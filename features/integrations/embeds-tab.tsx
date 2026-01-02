@@ -9,17 +9,23 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CodeBlock } from "@/components/code-block"
+import { useToast } from "@/hooks/use-toast"
 
 export function EmbedsTab() {
+  const { toast } = useToast()
   const [embedType, setEmbedType] = useState<"call" | "client">("call")
   const [resourceId, setResourceId] = useState("")
   const [theme, setTheme] = useState<"light" | "dark" | "auto">("auto")
+  const [embedUrl, setEmbedUrl] = useState<string>("")
+  const [snippet, setSnippet] = useState<string>("")
 
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "https://app.maxout.ai"
-  const embedUrl = `${baseUrl}/embed/${embedType}s/${resourceId || "{id}"}?theme=${theme}`
+  const previewUrl = embedUrl || `${baseUrl}/embed/${embedType}s/${resourceId || "{id}"}?token={token}&theme=${theme}`
 
-  const iframeCode = `<iframe
-  src="${embedUrl}"
+  const iframeCode = snippet
+    ? snippet
+    : `<iframe
+  src="${previewUrl}"
   width="100%"
   height="600"
   frameborder="0"
@@ -32,7 +38,7 @@ export function EmbedsTab() {
 export function MaxOutEmbed({ ${embedType}Id, theme = 'auto' }) {
   const iframeRef = useRef(null);
   
-  const src = \`${baseUrl}/embed/${embedType}s/\${${embedType}Id}?theme=\${theme}\`;
+  const src = \`${baseUrl}/embed/${embedType}s/\${${embedType}Id}?token={token}&theme=\${theme}\`;
 
   return (
     <iframe
@@ -51,7 +57,7 @@ export function MaxOutEmbed({ ${embedType}Id, theme = 'auto' }) {
 <script>
   (function() {
     var iframe = document.createElement('iframe');
-    iframe.src = '${embedUrl}';
+    iframe.src = '${previewUrl}';
     iframe.width = '100%';
     iframe.height = '600';
     iframe.frameBorder = '0';
@@ -88,7 +94,11 @@ export function MaxOutEmbed({ ${embedType}Id, theme = 'auto' }) {
               <Input
                 placeholder={embedType === "call" ? "call_abc123" : "client_xyz789"}
                 value={resourceId}
-                onChange={(e) => setResourceId(e.target.value)}
+                onChange={(e) => {
+                  setResourceId(e.target.value)
+                  setEmbedUrl("")
+                  setSnippet("")
+                }}
               />
             </div>
             <div className="space-y-2">
@@ -109,11 +119,33 @@ export function MaxOutEmbed({ ${embedType}Id, theme = 'auto' }) {
           <div className="space-y-2">
             <Label>Preview URL</Label>
             <div className="flex gap-2">
-              <Input value={embedUrl} readOnly className="font-mono text-sm" />
+              <Input value={previewUrl} readOnly className="font-mono text-sm" />
               <Button variant="outline" asChild>
-                <a href={embedUrl} target="_blank" rel="noopener noreferrer">
+                <a href={previewUrl.replace("{token}", "")} target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="h-4 w-4" />
                 </a>
+              </Button>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                disabled={!resourceId}
+                onClick={async () => {
+                  const res = await fetch("/api/integrations/embeds/token", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ scope: embedType, resourceId, expiresHours: 24 }),
+                  })
+                  const json = await res.json().catch(() => ({}))
+                  if (!res.ok) {
+                    toast({ title: "Failed to generate token", description: json?.error?.message ?? "Unknown error", variant: "destructive" })
+                    return
+                  }
+                  setEmbedUrl(json.data.embedUrl as string)
+                  setSnippet(json.data.snippet as string)
+                }}
+              >
+                Generate token
               </Button>
             </div>
           </div>

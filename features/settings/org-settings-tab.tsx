@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -10,20 +10,39 @@ import { useToast } from "@/hooks/use-toast"
 
 export function OrgSettingsTab() {
   const { toast } = useToast()
-  const [orgName, setOrgName] = useState("Acme Corp")
-  const [orgSlug, setOrgSlug] = useState("acme-corp")
-  const [orgDescription, setOrgDescription] = useState("Leading provider of innovative solutions")
+  const [orgName, setOrgName] = useState("")
+  const [orgSlug, setOrgSlug] = useState("")
+  const [orgDescription, setOrgDescription] = useState("")
   const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    fetch("/api/org")
+      .then((r) => r.json())
+      .then((json) => {
+        const org = json.data as { name: string; slug: string; description?: string | null }
+        setOrgName(org.name)
+        setOrgSlug(org.slug)
+        setOrgDescription(org.description ?? "")
+      })
+      .catch((e) => toast({ title: "Failed to load org", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" }))
+  }, [toast])
 
   const handleSave = async () => {
     setIsSaving(true)
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setIsSaving(false)
-    toast({
-      title: "Settings saved",
-      description: "Your organization settings have been updated.",
-    })
+    try {
+      const res = await fetch("/api/org", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: orgName, slug: orgSlug, description: orgDescription }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error?.message ?? "Save failed")
+      toast({ title: "Settings saved", description: "Your organization settings have been updated." })
+    } catch (e) {
+      toast({ title: "Save failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" })
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (

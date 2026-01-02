@@ -2,28 +2,45 @@ import { notFound } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Timeline, type TimelineItem } from "@/components/timeline"
-import { api } from "@/lib/api"
 import { formatDate, getInitials } from "@/lib/utils"
+import { verifyEmbedToken } from "@/src/lib/embeds/tokens"
+import { prisma } from "@/lib/prisma"
+import { toUiCall } from "@/src/lib/ui/mappers"
 
 export default async function EmbedClientPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ clientId: string }>
+  searchParams: Promise<{ token?: string }>
 }) {
   const { clientId } = await params
-  const client = await api.clients.getById(clientId)
+  const { token } = await searchParams
+  if (!token) notFound()
+
+  const payload = await verifyEmbedToken(token).catch(() => null)
+  if (!payload || payload.scope !== "client" || payload.resourceId !== clientId) notFound()
+
+  const client = await prisma.client.findFirst({
+    where: { id: clientId, orgId: payload.orgId },
+    include: {
+      calls: {
+        orderBy: { scheduledAt: "desc" },
+        include: { client: true, participants: true, mediaAssets: true, callSummary: true, actionItems: true, frameworkScores: { take: 1, orderBy: { createdAt: "desc" } } },
+      },
+    },
+  })
 
   if (!client) {
     notFound()
   }
 
-  const calls = await api.calls.list()
-  const clientCalls = calls.filter((c) => c.clientId === clientId)
+  const clientCalls = client.calls.map(toUiCall)
 
   const timelineItems: TimelineItem[] = clientCalls.map((call) => ({
     id: call.id,
     title: call.title,
-    description: call.summary || "No summary available",
+    description: call.summary?.overview || "No summary available",
     timestamp: call.scheduledAt,
     status: call.status === "ready" ? "completed" : call.status === "processing" ? "current" : "pending",
   }))
@@ -46,11 +63,13 @@ export default async function EmbedClientPage({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-sm text-muted-foreground">Total Calls</p>
-              <p className="text-2xl font-bold">{client.callCount}</p>
+              <p className="text-2xl font-bold">{client.calls.length}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Last Call</p>
-              <p className="text-2xl font-bold">{client.lastCallAt ? formatDate(client.lastCallAt) : "Never"}</p>
+              <p className="text-2xl font-bold">
+                {client.calls[0]?.scheduledAt ? formatDate(client.calls[0].scheduledAt.toISOString()) : "Never"}
+              </p>
             </div>
           </div>
         </CardContent>

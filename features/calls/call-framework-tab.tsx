@@ -1,33 +1,98 @@
 "use client"
 import Link from "next/link"
+import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EmptyState } from "@/components/empty-state"
 import { AlertCircle, CheckCircle2, Layers, ExternalLink } from "lucide-react"
-import type { Call } from "@/lib/types"
+import type { Call, Framework } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { listFrameworks } from "@/lib/api"
+import { useToast } from "@/hooks/use-toast"
 
 interface CallFrameworkTabProps {
   call: Call
 }
 
 export function CallFrameworkTab({ call }: CallFrameworkTabProps) {
+  const router = useRouter()
+  const { toast } = useToast()
+  const [frameworks, setFrameworks] = useState<Framework[]>([])
+  const [selectedVersionId, setSelectedVersionId] = useState<string>("")
+  const [isApplying, setIsApplying] = useState(false)
   const { frameworkScore } = call
 
   if (!frameworkScore) {
     return (
-      <EmptyState
-        icon={Layers}
-        title="No framework applied"
-        description="Apply a framework to this call to see coverage analysis and coaching recommendations."
-        action={
-          <Button asChild>
-            <Link href="/app/frameworks">Browse Frameworks</Link>
-          </Button>
-        }
-      />
+      <div className="space-y-4">
+        <EmptyState
+          icon={Layers}
+          title="No framework applied"
+          description="Apply a framework to this call to see coverage analysis and coaching recommendations."
+          action={
+            <Button asChild>
+              <Link href="/app/frameworks">Browse Frameworks</Link>
+            </Button>
+          }
+        />
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Apply Framework</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Select
+              value={selectedVersionId}
+              onValueChange={setSelectedVersionId}
+              onOpenChange={(open) => {
+                if (open && frameworks.length === 0) {
+                  listFrameworks().then(setFrameworks).catch(() => {})
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-[360px]">
+                <SelectValue placeholder="Select a framework" />
+              </SelectTrigger>
+              <SelectContent>
+                {frameworks.map((fw) =>
+                  fw.activeVersionId ? (
+                    <SelectItem key={fw.activeVersionId} value={fw.activeVersionId}>
+                      {fw.name}
+                    </SelectItem>
+                  ) : null,
+                )}
+              </SelectContent>
+            </Select>
+            <Button
+              disabled={!selectedVersionId || isApplying}
+              onClick={async () => {
+                setIsApplying(true)
+                try {
+                  const res = await fetch(`/api/calls/${call.id}/framework`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ frameworkVersionId: selectedVersionId }),
+                  })
+                  const json = await res.json().catch(() => ({}))
+                  if (!res.ok) throw new Error(json?.error?.message ?? "Failed to apply framework")
+                  toast({ title: "Framework applied", description: "Scoring will appear once analysis completes." })
+                  router.refresh()
+                } catch (e) {
+                  toast({ title: "Apply failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" })
+                } finally {
+                  setIsApplying(false)
+                }
+              }}
+            >
+              Apply
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
     )
   }
 

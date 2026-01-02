@@ -10,18 +10,46 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { createSupabaseBrowserClient } from "@/lib/supabase/client"
+import { useToast } from "@/hooks/use-toast"
 
 export default function SignupPage() {
   const router = useRouter()
+  const { toast } = useToast()
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [name, setName] = useState("")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [needsEmailConfirmation, setNeedsEmailConfirmation] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-    // Simulate signup
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    router.push("/app/calls")
+    try {
+      const supabase = createSupabaseBrowserClient()
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { name },
+        },
+      })
+      if (error) {
+        toast({ title: "Sign up failed", description: error.message, variant: "destructive" })
+        return
+      }
+
+      if (!data.session) {
+        setNeedsEmailConfirmation(true)
+        return
+      }
+
+      router.push("/app/calls")
+      router.refresh()
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -35,36 +63,70 @@ export default function SignupPage() {
           <CardDescription>Get started with MaxOut.ai</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
-              <Input id="name" type="text" placeholder="John Smith" required />
+          {needsEmailConfirmation ? (
+            <div className="space-y-4 text-center">
+              <p className="text-sm text-muted-foreground">
+                Check your email to confirm your account, then come back to sign in.
+              </p>
+              <Button asChild className="w-full">
+                <Link href="/login">Go to sign in</Link>
+              </Button>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Work Email</Label>
-              <Input id="email" type="email" placeholder="you@company.com" required />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
-                <Input id="password" type={showPassword ? "text" : "password"} required />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-0 top-0 h-full px-3"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  <span className="sr-only">Toggle password visibility</span>
-                </Button>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Full Name</Label>
+                <Input
+                  id="name"
+                  type="text"
+                  placeholder="John Smith"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  autoComplete="name"
+                />
               </div>
-            </div>
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create account
-            </Button>
-          </form>
+              <div className="space-y-2">
+                <Label htmlFor="email">Work Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="you@company.com"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="new-password"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-0 top-0 h-full px-3"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    <span className="sr-only">Toggle password visibility</span>
+                  </Button>
+                </div>
+              </div>
+              <Button type="submit" className="w-full" disabled={isLoading}>
+                {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Create account
+              </Button>
+            </form>
+          )}
           <p className="mt-4 text-center text-sm text-muted-foreground">
             Already have an account?{" "}
             <Link href="/login" className="text-foreground hover:underline">

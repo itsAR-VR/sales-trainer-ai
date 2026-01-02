@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Plus, MoreHorizontal, Mail, Trash2, Shield } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -35,35 +35,8 @@ interface Member {
   email: string
   role: "owner" | "admin" | "member"
   joinedAt: string
-  lastActiveAt: string
+  lastActiveAt: string | null
 }
-
-const mockMembers: Member[] = [
-  {
-    id: "user_1",
-    name: "John Smith",
-    email: "john@acme.com",
-    role: "owner",
-    joinedAt: "2023-06-01T00:00:00Z",
-    lastActiveAt: "2024-01-20T14:30:00Z",
-  },
-  {
-    id: "user_2",
-    name: "Sarah Johnson",
-    email: "sarah@acme.com",
-    role: "admin",
-    joinedAt: "2023-08-15T00:00:00Z",
-    lastActiveAt: "2024-01-20T10:00:00Z",
-  },
-  {
-    id: "user_3",
-    name: "Mike Wilson",
-    email: "mike@acme.com",
-    role: "member",
-    joinedAt: "2024-01-10T00:00:00Z",
-    lastActiveAt: "2024-01-19T16:45:00Z",
-  },
-]
 
 const roleColors: Record<string, "default" | "secondary" | "outline"> = {
   owner: "default",
@@ -73,35 +46,44 @@ const roleColors: Record<string, "default" | "secondary" | "outline"> = {
 
 export function MembersTab() {
   const { toast } = useToast()
-  const [members, setMembers] = useState<Member[]>(mockMembers)
+  const [members, setMembers] = useState<Member[]>([])
   const [isInviteOpen, setIsInviteOpen] = useState(false)
   const [inviteEmail, setInviteEmail] = useState("")
   const [inviteRole, setInviteRole] = useState<"admin" | "member">("member")
 
+  useEffect(() => {
+    fetch("/api/org/members")
+      .then((r) => r.json())
+      .then((json) => setMembers(json.data as Member[]))
+      .catch((e) =>
+        toast({ title: "Failed to load members", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" }),
+      )
+  }, [toast])
+
   const handleInvite = () => {
     toast({
-      title: "Invitation sent",
-      description: `An invitation has been sent to ${inviteEmail}`,
+      title: "Invite not yet implemented",
+      description: "This demo only supports existing members. Add invites when you wire Supabase admin invites.",
     })
     setInviteEmail("")
     setInviteRole("member")
     setIsInviteOpen(false)
   }
 
-  const handleRemoveMember = (member: Member) => {
-    setMembers(members.filter((m) => m.id !== member.id))
-    toast({
-      title: "Member removed",
-      description: `${member.name} has been removed from the organization.`,
-    })
+  const handleRemoveMember = async (member: Member) => {
+    await fetch(`/api/org/members/${member.id}`, { method: "DELETE" })
+    setMembers((prev) => prev.filter((m) => m.id !== member.id))
+    toast({ title: "Member removed", description: `${member.name} has been removed from the organization.` })
   }
 
-  const handleChangeRole = (memberId: string, newRole: "admin" | "member") => {
-    setMembers(members.map((m) => (m.id === memberId ? { ...m, role: newRole } : m)))
-    toast({
-      title: "Role updated",
-      description: "Member role has been updated successfully.",
+  const handleChangeRole = async (memberId: string, newRole: "admin" | "member") => {
+    await fetch(`/api/org/members/${memberId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: newRole }),
     })
+    setMembers((prev) => prev.map((m) => (m.id === memberId ? { ...m, role: newRole } : m)))
+    toast({ title: "Role updated", description: "Member role has been updated successfully." })
   }
 
   return (
@@ -195,7 +177,7 @@ export function MembersTab() {
                   </Badge>
                 </TableCell>
                 <TableCell className="text-muted-foreground">{formatDate(member.joinedAt)}</TableCell>
-                <TableCell className="text-muted-foreground">{formatDate(member.lastActiveAt)}</TableCell>
+                <TableCell className="text-muted-foreground">{member.lastActiveAt ? formatDate(member.lastActiveAt) : "—"}</TableCell>
                 <TableCell>
                   {member.role !== "owner" && (
                     <DropdownMenu>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Plus, Trash2, TestTube, Webhook, MoreHorizontal, CheckCircle, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -35,29 +35,6 @@ interface WebhookSubscription {
   lastStatus: "success" | "failed" | null
 }
 
-const mockWebhooks: WebhookSubscription[] = [
-  {
-    id: "wh_1",
-    url: "https://api.example.com/webhooks/maxout",
-    events: ["call.completed", "call.failed"],
-    enabled: true,
-    secret: "whsec_abc123xyz",
-    createdAt: "2024-01-10T08:00:00Z",
-    lastTriggeredAt: "2024-01-20T14:30:00Z",
-    lastStatus: "success",
-  },
-  {
-    id: "wh_2",
-    url: "https://hooks.slack.com/services/xxx",
-    events: ["call.completed"],
-    enabled: false,
-    secret: "whsec_def456uvw",
-    createdAt: "2024-01-05T10:00:00Z",
-    lastTriggeredAt: "2024-01-15T09:00:00Z",
-    lastStatus: "failed",
-  },
-]
-
 const availableEvents = [
   { id: "call.created", label: "Call Created", description: "When a new call is registered" },
   { id: "call.completed", label: "Call Completed", description: "When a call finishes processing" },
@@ -68,42 +45,52 @@ const availableEvents = [
 
 export function WebhooksTab() {
   const { toast } = useToast()
-  const [webhooks, setWebhooks] = useState<WebhookSubscription[]>(mockWebhooks)
+  const [webhooks, setWebhooks] = useState<WebhookSubscription[]>([])
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [newUrl, setNewUrl] = useState("")
   const [selectedEvents, setSelectedEvents] = useState<string[]>([])
 
-  const handleCreateWebhook = () => {
-    const newWebhook: WebhookSubscription = {
-      id: `wh_${Date.now()}`,
-      url: newUrl,
-      events: selectedEvents,
-      enabled: true,
-      secret: `whsec_${Math.random().toString(36).substring(2, 20)}`,
-      createdAt: new Date().toISOString(),
-      lastTriggeredAt: null,
-      lastStatus: null,
+  useEffect(() => {
+    fetch("/api/integrations/webhooks")
+      .then((r) => r.json())
+      .then((json) => setWebhooks(json.data as WebhookSubscription[]))
+      .catch((e) =>
+        toast({ title: "Failed to load webhooks", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" }),
+      )
+  }, [toast])
+
+  const handleCreateWebhook = async () => {
+    const res = await fetch("/api/integrations/webhooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: newUrl, events: selectedEvents }),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      toast({ title: "Webhook create failed", description: json?.error?.message ?? "Unknown error", variant: "destructive" })
+      return
     }
-    setWebhooks([...webhooks, newWebhook])
+    const wh = json.data as WebhookSubscription
+    setWebhooks((prev) => [wh, ...prev])
     setNewUrl("")
     setSelectedEvents([])
     setIsCreateOpen(false)
-    toast({
-      title: "Webhook created",
-      description: "Your webhook subscription has been created successfully.",
-    })
+    toast({ title: "Webhook created", description: "Your webhook subscription has been created." })
   }
 
-  const handleDeleteWebhook = (id: string) => {
-    setWebhooks(webhooks.filter((wh) => wh.id !== id))
-    toast({
-      title: "Webhook deleted",
-      description: "The webhook subscription has been removed.",
-    })
+  const handleDeleteWebhook = async (id: string) => {
+    await fetch(`/api/integrations/webhooks/${id}`, { method: "DELETE" })
+    setWebhooks((prev) => prev.filter((wh) => wh.id !== id))
+    toast({ title: "Webhook deleted", description: "The webhook subscription has been removed." })
   }
 
-  const handleToggleWebhook = (id: string, enabled: boolean) => {
-    setWebhooks(webhooks.map((wh) => (wh.id === id ? { ...wh, enabled } : wh)))
+  const handleToggleWebhook = async (id: string, enabled: boolean) => {
+    await fetch(`/api/integrations/webhooks/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    })
+    setWebhooks((prev) => prev.map((wh) => (wh.id === id ? { ...wh, enabled } : wh)))
   }
 
   const handleTestWebhook = (webhook: WebhookSubscription) => {

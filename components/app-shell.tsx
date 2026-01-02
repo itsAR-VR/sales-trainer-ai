@@ -5,6 +5,7 @@ import type React from "react"
 import { useState } from "react"
 import Link from "next/link"
 import { Bell, LogOut, Settings, Moon, Sun } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -17,17 +18,43 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { SidebarNav } from "./sidebar-nav"
 import { CommandPalette } from "./command-palette"
+import { createSupabaseBrowserClient } from "@/lib/supabase/client"
+import { useToast } from "@/hooks/use-toast"
+import { getInitials } from "@/lib/utils"
 
 interface AppShellProps {
   children: React.ReactNode
+  viewer?: {
+    name: string | null
+    email: string | null
+    orgName?: string | null
+  }
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children, viewer }: AppShellProps) {
+  const router = useRouter()
+  const { toast } = useToast()
   const [isDark, setIsDark] = useState(false)
 
   const toggleTheme = () => {
     setIsDark(!isDark)
     document.documentElement.classList.toggle("dark")
+  }
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" })
+      const supabase = createSupabaseBrowserClient()
+      await supabase.auth.signOut()
+      router.push("/login")
+      router.refresh()
+    } catch (e) {
+      toast({
+        title: "Logout failed",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      })
+    }
   }
 
   return (
@@ -56,15 +83,15 @@ export function AppShell({ children }: AppShellProps) {
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                   <Avatar className="h-8 w-8">
-                    <AvatarFallback>JS</AvatarFallback>
+                    <AvatarFallback>{getInitials(viewer?.name || viewer?.email || "User")}</AvatarFallback>
                   </Avatar>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel className="font-normal">
                   <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-medium">John Smith</p>
-                    <p className="text-xs text-muted-foreground">john@company.com</p>
+                    <p className="text-sm font-medium">{viewer?.name || "Signed in"}</p>
+                    <p className="text-xs text-muted-foreground">{viewer?.email || ""}</p>
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
@@ -75,11 +102,9 @@ export function AppShell({ children }: AppShellProps) {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link href="/login">
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Log out
-                  </Link>
+                <DropdownMenuItem onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Log out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

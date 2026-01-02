@@ -13,8 +13,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { PageHeader } from "@/components/page-header"
-import { api } from "@/lib/api"
 import { formatDate } from "@/lib/utils"
+import { prisma } from "@/lib/prisma"
+import { requireOrgContext } from "@/src/lib/auth/context"
+import { toUiFramework } from "@/src/lib/ui/mappers"
 
 export default async function FrameworkDetailPage({
   params,
@@ -22,11 +24,28 @@ export default async function FrameworkDetailPage({
   params: Promise<{ frameworkId: string }>
 }) {
   const { frameworkId } = await params
-  const framework = await api.frameworks.getById(frameworkId)
+  const ctx = await requireOrgContext()
+  if (!ctx.ok) notFound()
+
+  const frameworkRow = await prisma.framework.findFirst({
+    where: { id: frameworkId, orgId: ctx.org.id },
+    include: { versions: { include: { phases: { include: { questions: true } } } } },
+  })
+  const framework = frameworkRow ? toUiFramework(frameworkRow) : null
 
   if (!framework) {
     notFound()
   }
+
+  const calls = await prisma.call.findMany({
+    where: { orgId: ctx.org.id, frameworkVersion: { frameworkId } },
+    select: { frameworkScores: { take: 1, orderBy: { createdAt: "desc" }, select: { payloadJson: true } } },
+  })
+  const overallScores = calls
+    .map((c) => (c.frameworkScores[0]?.payloadJson as any)?.overallScore)
+    .filter((n): n is number => typeof n === "number")
+  const avgCoverage = overallScores.length ? Math.round(overallScores.reduce((a, b) => a + b, 0) / overallScores.length) : 0
+  const callCount = calls.length
 
   return (
     <div className="flex flex-col gap-6">
@@ -36,12 +55,14 @@ export default async function FrameworkDetailPage({
         breadcrumbs={[{ label: "Frameworks", href: "/app/frameworks" }, { label: framework.name }]}
         actions={
           <div className="flex items-center gap-2">
-            <Button variant="outline" asChild>
-              <Link href={`/app/frameworks/${frameworkId}/versions/${framework.activeVersionId}/edit`}>
-                <Edit className="mr-2 h-4 w-4" />
-                Edit Active Version
-              </Link>
-            </Button>
+            {framework.activeVersionId ? (
+              <Button variant="outline" asChild>
+                <Link href={`/app/frameworks/${frameworkId}/versions/${framework.activeVersionId}/edit`}>
+                  <Edit className="mr-2 h-4 w-4" />
+                  Edit Active Version
+                </Link>
+              </Button>
+            ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon">
@@ -68,13 +89,13 @@ export default async function FrameworkDetailPage({
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total Calls</CardDescription>
-            <CardTitle className="text-3xl">{framework.callCount}</CardTitle>
+            <CardTitle className="text-3xl">{callCount}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Avg Coverage</CardDescription>
-            <CardTitle className="text-3xl">{framework.avgCoverage}%</CardTitle>
+            <CardTitle className="text-3xl">{avgCoverage}%</CardTitle>
           </CardHeader>
         </Card>
         <Card>

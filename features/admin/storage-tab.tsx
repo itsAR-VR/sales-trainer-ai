@@ -1,27 +1,47 @@
 "use client"
 
+import { useEffect, useMemo, useState } from "react"
 import { HardDrive, Video, AudioLines, FileText, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
-const storageByType = [
-  { type: "Video Recordings", icon: Video, size: 45.2, unit: "GB", color: "bg-blue-500" },
-  { type: "Audio Recordings", icon: AudioLines, size: 12.8, unit: "GB", color: "bg-green-500" },
-  { type: "Transcripts", icon: FileText, size: 1.5, unit: "GB", color: "bg-yellow-500" },
-  { type: "Analysis Data", icon: HardDrive, size: 0.6, unit: "GB", color: "bg-purple-500" },
-]
+type StorageUsage = {
+  totalBytes: number
+  videoBytes: number
+  audioBytes: number
+  transcriptBytes: number
+  otherBytes: number
+  callCount: number
+  largestCalls: Array<{ id: string; title: string; date: string; sizeBytes: number }>
+}
 
-const largestCalls = [
-  { id: "call_abc123", title: "Q4 Planning Session", size: 2.4, date: "2024-01-15" },
-  { id: "call_def456", title: "Product Demo - Enterprise", size: 1.8, date: "2024-01-12" },
-  { id: "call_ghi789", title: "Team Retrospective", size: 1.5, date: "2024-01-10" },
-  { id: "call_jkl012", title: "Client Onboarding", size: 1.2, date: "2024-01-08" },
-  { id: "call_mno345", title: "Sales Training", size: 1.1, date: "2024-01-05" },
-]
+function bytesToGb(bytes: number) {
+  return bytes / (1024 * 1024 * 1024)
+}
 
 export function StorageTab() {
+  const [usage, setUsage] = useState<StorageUsage | null>(null)
+
+  useEffect(() => {
+    fetch("/api/admin/storage")
+      .then((r) => r.json())
+      .then((json) => setUsage(json.data as StorageUsage))
+      .catch(() => {})
+  }, [])
+
+  const storageByType = useMemo(() => {
+    const u = usage
+    if (!u) return []
+    return [
+      { type: "Video Recordings", icon: Video, size: bytesToGb(u.videoBytes), unit: "GB", color: "bg-blue-500" },
+      { type: "Audio Recordings", icon: AudioLines, size: bytesToGb(u.audioBytes), unit: "GB", color: "bg-green-500" },
+      { type: "Transcripts", icon: FileText, size: bytesToGb(u.transcriptBytes), unit: "GB", color: "bg-yellow-500" },
+      { type: "Other", icon: HardDrive, size: bytesToGb(u.otherBytes), unit: "GB", color: "bg-purple-500" },
+    ]
+  }, [usage])
+
   const totalUsed = storageByType.reduce((acc, item) => acc + item.size, 0)
   const totalLimit = 100
 
@@ -118,7 +138,7 @@ export function StorageTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {largestCalls.map((call) => (
+              {(usage?.largestCalls ?? []).map((call) => (
                 <TableRow key={call.id}>
                   <TableCell>
                     <div>
@@ -127,7 +147,7 @@ export function StorageTab() {
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{call.date}</TableCell>
-                  <TableCell>{call.size} GB</TableCell>
+                  <TableCell>{bytesToGb(call.sizeBytes).toFixed(2)} GB</TableCell>
                   <TableCell>
                     <Button variant="ghost" size="sm">
                       View

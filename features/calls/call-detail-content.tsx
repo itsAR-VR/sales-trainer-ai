@@ -21,9 +21,9 @@ export function CallDetailContent({ call }: CallDetailContentProps) {
 
   useEffect(() => {
     const loadData = async () => {
-      const [transcriptData, url] = await Promise.all([getCallTranscript(call.id), getCallPlaybackUrl(call.id)])
-      setTranscript(transcriptData)
-      setPlaybackUrl(url)
+      const [transcriptRes, urlRes] = await Promise.allSettled([getCallTranscript(call.id), getCallPlaybackUrl(call.id)])
+      if (transcriptRes.status === "fulfilled") setTranscript(transcriptRes.value)
+      if (urlRes.status === "fulfilled") setPlaybackUrl(urlRes.value)
     }
     loadData()
   }, [call.id])

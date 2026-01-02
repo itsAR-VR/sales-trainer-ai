@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react"
 import type { OrgCapabilities } from "@/lib/types"
-import { getOrgCapabilities } from "@/lib/api"
 import { defaultCapabilities } from "@/lib/org-capabilities"
 
 export function useOrgCapabilities() {
@@ -10,7 +9,9 @@ export function useOrgCapabilities() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    getOrgCapabilities()
+    fetch("/api/me")
+      .then((r) => r.json())
+      .then((json) => (json.capabilities as OrgCapabilities) ?? defaultCapabilities)
       .then(setCapabilities)
       .finally(() => setIsLoading(false))
   }, [])

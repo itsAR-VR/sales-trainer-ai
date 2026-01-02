@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Plus, Trash2, ChevronUp, ChevronDown, Save } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -17,9 +18,11 @@ interface FrameworkBuilderProps {
 }
 
 export function FrameworkBuilder({ framework, version }: FrameworkBuilderProps) {
+  const router = useRouter()
   const { toast } = useToast()
   const [phases, setPhases] = useState<Phase[]>(version.phases)
   const [isDirty, setIsDirty] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
 
   const handleAddPhase = () => {
     const newPhase: Phase = {
@@ -115,12 +118,27 @@ export function FrameworkBuilder({ framework, version }: FrameworkBuilderProps) 
     setIsDirty(true)
   }
 
-  const handleSave = () => {
-    toast({
-      title: "Framework saved",
-      description: "Your changes have been saved successfully.",
-    })
-    setIsDirty(false)
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      const res = await fetch(`/api/frameworks/${framework.id}/versions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phases, makeActive: true }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error?.message ?? "Save failed")
+
+      const newVersionId = json.data.versionId as string
+      toast({ title: "Framework saved", description: "A new version has been created and activated." })
+      setIsDirty(false)
+      router.replace(`/app/frameworks/${framework.id}/versions/${newVersionId}/edit`)
+      router.refresh()
+    } catch (e) {
+      toast({ title: "Save failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" })
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -135,9 +153,9 @@ export function FrameworkBuilder({ framework, version }: FrameworkBuilderProps) 
             <Plus className="mr-2 h-4 w-4" />
             Add Phase
           </Button>
-          <Button onClick={handleSave} disabled={!isDirty}>
+          <Button onClick={handleSave} disabled={!isDirty || isSaving}>
             <Save className="mr-2 h-4 w-4" />
-            Save Changes
+            {isSaving ? "Saving..." : "Save Changes"}
           </Button>
         </div>
       </div>

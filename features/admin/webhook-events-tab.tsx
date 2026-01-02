@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { RefreshCw, Eye, CheckCircle, XCircle, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -23,54 +23,21 @@ interface WebhookEvent {
   response: string | null
 }
 
-const mockEvents: WebhookEvent[] = [
-  {
-    id: "evt_1",
-    eventType: "call.completed",
-    url: "https://api.example.com/webhooks/maxout",
-    status: "delivered",
-    statusCode: 200,
-    attempts: 1,
-    createdAt: "2024-01-20T14:30:00Z",
-    payload: { callId: "call_abc123", status: "ready" },
-    response: '{"success": true}',
-  },
-  {
-    id: "evt_2",
-    eventType: "call.failed",
-    url: "https://api.example.com/webhooks/maxout",
-    status: "failed",
-    statusCode: 500,
-    attempts: 3,
-    createdAt: "2024-01-20T13:00:00Z",
-    payload: { callId: "call_def456", error: "Processing failed" },
-    response: "Internal Server Error",
-  },
-  {
-    id: "evt_3",
-    eventType: "call.created",
-    url: "https://hooks.slack.com/services/xxx",
-    status: "pending",
-    statusCode: null,
-    attempts: 0,
-    createdAt: "2024-01-20T12:00:00Z",
-    payload: { callId: "call_ghi789" },
-    response: null,
-  },
-]
-
 export function WebhookEventsTab() {
-  const [events, setEvents] = useState<WebhookEvent[]>(mockEvents)
+  const [events, setEvents] = useState<WebhookEvent[]>([])
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [selectedEvent, setSelectedEvent] = useState<WebhookEvent | null>(null)
 
-  const filteredEvents = events.filter((event) => statusFilter === "all" || event.status === statusFilter)
+  const load = () =>
+    fetch("/api/admin/webhook-events")
+      .then((r) => r.json())
+      .then((json) => setEvents(json.data as WebhookEvent[]))
 
-  const handleRetry = (eventId: string) => {
-    setEvents(
-      events.map((e) => (e.id === eventId ? { ...e, status: "pending" as const, attempts: e.attempts + 1 } : e)),
-    )
-  }
+  useEffect(() => {
+    load().catch(() => {})
+  }, [])
+
+  const filteredEvents = events.filter((event) => statusFilter === "all" || event.status === statusFilter)
 
   return (
     <>
@@ -93,7 +60,13 @@ export function WebhookEventsTab() {
                   <SelectItem value="pending">Pending</SelectItem>
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="icon">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => {
+                  load().catch(() => {})
+                }}
+              >
                 <RefreshCw className="h-4 w-4" />
               </Button>
             </div>
@@ -145,11 +118,6 @@ export function WebhookEventsTab() {
                       <Button variant="ghost" size="icon" onClick={() => setSelectedEvent(event)}>
                         <Eye className="h-4 w-4" />
                       </Button>
-                      {event.status === "failed" && (
-                        <Button variant="ghost" size="icon" onClick={() => handleRetry(event.id)}>
-                          <RefreshCw className="h-4 w-4" />
-                        </Button>
-                      )}
                     </div>
                   </TableCell>
                 </TableRow>

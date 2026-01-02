@@ -9,18 +9,30 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { createSupabaseBrowserClient } from "@/lib/supabase/client"
+import { useToast } from "@/hooks/use-toast"
 
 export default function ForgotPasswordPage() {
+  const { toast } = useToast()
   const [isLoading, setIsLoading] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
+  const [email, setEmail] = useState("")
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setIsLoading(false)
-    setIsSubmitted(true)
+    try {
+      const supabase = createSupabaseBrowserClient()
+      const redirectTo = `${window.location.origin}/reset-password`
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
+      if (error) {
+        toast({ title: "Reset failed", description: error.message, variant: "destructive" })
+        return
+      }
+      setIsSubmitted(true)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -55,7 +67,15 @@ export default function ForgotPasswordPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" placeholder="you@company.com" required />
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="you@company.com"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                />
               </div>
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

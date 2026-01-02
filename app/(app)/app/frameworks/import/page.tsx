@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Upload, FileText, Sparkles, Check, ChevronRight, Loader2, Save } from "lucide-react"
 import type { FrameworkVersion } from "@/lib/types"
 import {
@@ -28,7 +29,9 @@ export default function ImportFrameworkPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [extractionId, setExtractionId] = useState<string>("")
   const [extractedText, setExtractedText] = useState<string>("")
+  const [ocrRequired, setOcrRequired] = useState(false)
   const [draftFramework, setDraftFramework] = useState<FrameworkVersion | null>(null)
+  const [promptViewText, setPromptViewText] = useState<string>("")
   const [dragActive, setDragActive] = useState(false)
   const [frameworkName, setFrameworkName] = useState("")
 
@@ -42,10 +45,15 @@ export default function ImportFrameworkPage() {
   const handleFileUpload = async (file: File) => {
     setIsLoading(true)
     try {
-      const { extractionId } = await uploadFrameworkDocument(file)
+      const { extractionId, ocrRequired } = await uploadFrameworkDocument(file)
       setExtractionId(extractionId)
-      const text = await getExtractedText(extractionId)
-      setExtractedText(text)
+      setOcrRequired(!!ocrRequired)
+      if (!ocrRequired) {
+        const text = await getExtractedText(extractionId)
+        setExtractedText(text)
+      } else {
+        setExtractedText("")
+      }
       setStep("extract")
     } finally {
       setIsLoading(false)
@@ -55,8 +63,9 @@ export default function ImportFrameworkPage() {
   const handleGenerateDraft = async () => {
     setIsLoading(true)
     try {
-      const draft = await generateFrameworkDraft(extractionId)
-      setDraftFramework(draft)
+      const { version, promptViewText } = await generateFrameworkDraft(extractionId)
+      setDraftFramework(version)
+      setPromptViewText(promptViewText)
       setStep("draft")
     } finally {
       setIsLoading(false)
@@ -175,6 +184,14 @@ export default function ImportFrameworkPage() {
                 <h3 className="text-lg font-semibold">Extracted Text</h3>
                 <p className="text-sm text-muted-foreground">Review the extracted content from your document</p>
               </div>
+              {ocrRequired ? (
+                <Alert>
+                  <AlertTitle>OCR required</AlertTitle>
+                  <AlertDescription>
+                    This document appears to be scanned or image-based. OCR isn't implemented yet, so text extraction is empty.
+                  </AlertDescription>
+                </Alert>
+              ) : null}
               <div className="max-h-[400px] overflow-y-auto rounded-lg border bg-muted p-4">
                 <pre className="whitespace-pre-wrap text-sm">{extractedText}</pre>
               </div>
@@ -182,7 +199,7 @@ export default function ImportFrameworkPage() {
                 <Button variant="outline" onClick={() => setStep("upload")}>
                   Upload Different File
                 </Button>
-                <Button onClick={handleGenerateDraft} disabled={isLoading}>
+                <Button onClick={handleGenerateDraft} disabled={isLoading || ocrRequired}>
                   {isLoading ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
@@ -243,6 +260,13 @@ export default function ImportFrameworkPage() {
                   </Card>
                 ))}
               </div>
+
+              <details className="rounded-lg border p-4 bg-muted/20">
+                <summary className="cursor-pointer text-sm font-medium">Advanced: prompt view</summary>
+                <div className="mt-3 max-h-[280px] overflow-auto rounded-md bg-muted p-3">
+                  <pre className="whitespace-pre-wrap text-xs">{promptViewText}</pre>
+                </div>
+              </details>
 
               <div className="flex justify-between">
                 <Button variant="outline" onClick={() => setStep("extract")}>

@@ -6,27 +6,28 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { StatusBadge } from "@/components/status-badge"
 import { RefreshCw, Loader2 } from "lucide-react"
-import type { Call, WebhookEvent, JobAttempt } from "@/lib/types"
-import { listWebhookEvents, listJobAttempts, rerunCallFinalize } from "@/lib/api"
+import type { Call } from "@/lib/types"
+import { rerunCallFinalize } from "@/lib/api"
 
 interface CallDebugTabProps {
   call: Call
 }
 
 export function CallDebugTab({ call }: CallDebugTabProps) {
-  const [webhookEvents, setWebhookEvents] = useState<WebhookEvent[]>([])
-  const [jobs, setJobs] = useState<JobAttempt[]>([])
+  const [webhookEvents, setWebhookEvents] = useState<any[]>([])
+  const [jobs, setJobs] = useState<any[]>([])
   const [isRerunning, setIsRerunning] = useState(false)
 
   useEffect(() => {
-    // Load debug data
-    listWebhookEvents().then((events) => {
-      // Filter for this call (in real app would filter server-side)
-      setWebhookEvents(events.slice(0, 3))
-    })
-    listJobAttempts().then((j) => {
-      setJobs(j.filter((job) => job.entityId === call.id))
-    })
+    fetch("/api/admin/webhook-events")
+      .then((r) => r.json())
+      .then((json) => setWebhookEvents((json.data as any[]).slice(0, 10)))
+      .catch(() => {})
+
+    fetch("/api/admin/jobs")
+      .then((r) => r.json())
+      .then((json) => setJobs((json.data as any[]).filter((job) => job.callId === call.id)))
+      .catch(() => {})
   }, [call.id])
 
   const handleRerun = async () => {
@@ -64,7 +65,7 @@ export function CallDebugTab({ call }: CallDebugTabProps) {
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-base">Job Attempts</CardTitle>
+            <CardTitle className="text-base">Jobs</CardTitle>
             {call.status === "failed" && (
               <Button variant="outline" size="sm" onClick={handleRerun} disabled={isRerunning}>
                 {isRerunning ? (
@@ -92,7 +93,7 @@ export function CallDebugTab({ call }: CallDebugTabProps) {
               <TableBody>
                 {jobs.map((job) => (
                   <TableRow key={job.id}>
-                    <TableCell className="font-mono text-xs">{job.jobType}</TableCell>
+                    <TableCell className="font-mono text-xs">{job.type}</TableCell>
                     <TableCell>
                       <StatusBadge status={job.status} />
                     </TableCell>
@@ -101,7 +102,7 @@ export function CallDebugTab({ call }: CallDebugTabProps) {
                       {job.startedAt ? new Date(job.startedAt).toLocaleString() : "-"}
                     </TableCell>
                     <TableCell className="max-w-[200px] truncate text-xs text-destructive">
-                      {job.lastError || "-"}
+                      {job.error || "-"}
                     </TableCell>
                   </TableRow>
                 ))}

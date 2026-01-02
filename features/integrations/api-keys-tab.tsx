@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Plus, Trash2, Eye, EyeOff, Key } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -21,6 +21,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { EmptyState } from "@/components/empty-state"
 import { CopyButton } from "@/components/copy-button"
 import { formatDate } from "@/lib/utils"
+import { useToast } from "@/hooks/use-toast"
 
 interface ApiKey {
   id: string
@@ -30,25 +31,6 @@ interface ApiKey {
   createdAt: string
   lastUsedAt: string | null
 }
-
-const mockApiKeys: ApiKey[] = [
-  {
-    id: "key_1",
-    name: "Production API",
-    prefix: "sk_live_abc123",
-    scopes: ["calls:read", "calls:write", "frameworks:read"],
-    createdAt: "2024-01-15T10:00:00Z",
-    lastUsedAt: "2024-01-20T14:30:00Z",
-  },
-  {
-    id: "key_2",
-    name: "Development",
-    prefix: "sk_test_xyz789",
-    scopes: ["calls:read"],
-    createdAt: "2024-01-10T08:00:00Z",
-    lastUsedAt: null,
-  },
-]
 
 const availableScopes = [
   { id: "calls:read", label: "Read Calls", description: "View call data and recordings" },
@@ -60,30 +42,45 @@ const availableScopes = [
 ]
 
 export function ApiKeysTab() {
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>(mockApiKeys)
+  const { toast } = useToast()
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([])
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [newKeyName, setNewKeyName] = useState("")
   const [selectedScopes, setSelectedScopes] = useState<string[]>([])
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null)
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set())
 
-  const handleCreateKey = () => {
-    const newKey: ApiKey = {
-      id: `key_${Date.now()}`,
-      name: newKeyName,
-      prefix: `sk_live_${Math.random().toString(36).substring(2, 10)}`,
-      scopes: selectedScopes,
-      createdAt: new Date().toISOString(),
-      lastUsedAt: null,
+  useEffect(() => {
+    fetch("/api/integrations/api-keys")
+      .then((r) => r.json())
+      .then((json) => setApiKeys(json.data as ApiKey[]))
+      .catch((e) =>
+        toast({ title: "Failed to load API keys", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" }),
+      )
+  }, [toast])
+
+  const handleCreateKey = async () => {
+    const res = await fetch("/api/integrations/api-keys", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newKeyName, scopes: selectedScopes }),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      toast({ title: "Failed to create key", description: json?.error?.message ?? "Unknown error", variant: "destructive" })
+      return
     }
-    setApiKeys([...apiKeys, newKey])
-    setNewlyCreatedKey(`sk_live_${Math.random().toString(36).substring(2, 30)}`)
+
+    const { key, fullKey } = json.data as { key: ApiKey; fullKey: string }
+    setApiKeys((prev) => [key, ...prev])
+    setNewlyCreatedKey(fullKey)
     setNewKeyName("")
     setSelectedScopes([])
   }
 
-  const handleDeleteKey = (id: string) => {
-    setApiKeys(apiKeys.filter((key) => key.id !== id))
+  const handleDeleteKey = async (id: string) => {
+    await fetch(`/api/integrations/api-keys/${id}`, { method: "DELETE" })
+    setApiKeys((prev) => prev.filter((key) => key.id !== id))
   }
 
   const toggleKeyVisibility = (id: string) => {

@@ -150,18 +150,18 @@ export interface Question {
   id: string
   text: string
   weight: number
-  tags: string[]
-  required: boolean
+  tags?: string[]
+  required?: boolean
   order: number
 }
 
 export interface Phase {
   id: string
   name: string
-  objective: string
-  rubric: string
+  objective?: string
+  rubric?: string
   questions: Question[]
-  battleCards: BattleCard[]
+  battleCards?: BattleCard[]
   order: number
 }
 
@@ -185,6 +185,8 @@ export interface Framework {
   activeVersionId?: string
   versions: FrameworkVersion[]
   usageCount: number
+  callCount?: number
+  avgCoverage?: number
   createdAt: string
   updatedAt: string
 }

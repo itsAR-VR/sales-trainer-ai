@@ -4,32 +4,62 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { StatusBadge } from "@/components/status-badge"
 import { VideoPlayerCard } from "@/components/video-player-card"
 import { TranscriptViewer } from "@/components/transcript-viewer"
-import { api } from "@/lib/api"
 import { formatDate, formatDuration } from "@/lib/utils"
+import { verifyEmbedToken } from "@/src/lib/embeds/tokens"
+import { prisma } from "@/lib/prisma"
+import { toUiCall, toUiTranscriptSegments } from "@/src/lib/ui/mappers"
+import { getSignedDownloadUrl } from "@/src/lib/storage/s3"
 
 export default async function EmbedCallPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ callId: string }>
+  searchParams: Promise<{ token?: string }>
 }) {
   const { callId } = await params
-  const call = await api.calls.getById(callId)
+  const { token } = await searchParams
+  if (!token) notFound()
+
+  const payload = await verifyEmbedToken(token).catch(() => null)
+  if (!payload || payload.scope !== "call" || payload.resourceId !== callId) notFound()
+
+  const callRow = await prisma.call.findFirst({
+    where: { id: callId, orgId: payload.orgId },
+    include: {
+      client: true,
+      participants: true,
+      mediaAssets: true,
+      callSummary: true,
+      actionItems: true,
+      frameworkScores: { take: 1, orderBy: { createdAt: "desc" } },
+    },
+  })
+  const call = callRow ? toUiCall(callRow) : null
 
   if (!call) {
     notFound()
   }
 
-  const videoAsset = call.mediaAssets?.find((a) => a.type === "video")
+  const videoAsset = callRow?.mediaAssets.find((a) => a.type === "video_mixed" && a.verifiedAt) ?? null
+  const playbackUrl =
+    videoAsset ? await getSignedDownloadUrl({ bucket: videoAsset.bucket, key: videoAsset.path, expiresSeconds: 60 * 10 }) : ""
+
+  const segments = await prisma.transcriptSegment.findMany({
+    where: { callId },
+    select: { id: true, speakerLabel: true, speakerRole: true, startMs: true, endMs: true, text: true },
+  })
+  const transcript = toUiTranscriptSegments(segments)
 
   return (
     <div className="container max-w-5xl py-6">
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-2">
           <h1 className="text-2xl font-bold">{call.title}</h1>
-          <StatusBadge status={call.status} type="call" />
+          <StatusBadge status={call.status} />
         </div>
         <p className="text-muted-foreground">
-          {formatDate(call.scheduledAt)} • {formatDuration(call.durationSeconds || 0)}
+          {formatDate(call.scheduledAt)} • {formatDuration(call.duration || 0)}
         </p>
       </div>
 
@@ -40,21 +70,21 @@ export default async function EmbedCallPage({
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
-          {videoAsset && (
+          {playbackUrl && (
             <VideoPlayerCard
-              src={videoAsset.url || ""}
+              src={playbackUrl}
               title="Call Recording"
-              metadata={[{ label: "Duration", value: formatDuration(call.durationSeconds || 0) }]}
+              metadata={[{ label: "Duration", value: formatDuration(call.duration || 0) }]}
             />
           )}
 
-          {call.summary && (
+          {call.summary?.overview && (
             <Card>
               <CardHeader>
                 <CardTitle>Summary</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-muted-foreground whitespace-pre-wrap">{call.summary}</p>
+                <p className="text-muted-foreground whitespace-pre-wrap">{call.summary.overview}</p>
               </CardContent>
             </Card>
           )}
@@ -71,7 +101,7 @@ export default async function EmbedCallPage({
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
                         {index + 1}
                       </span>
-                      <span className="text-muted-foreground">{item}</span>
+                      <span className="text-muted-foreground">{item.text}</span>
                     </li>
                   ))}
                 </ul>
@@ -83,8 +113,8 @@ export default async function EmbedCallPage({
         <TabsContent value="transcript">
           <Card>
             <CardContent className="pt-6">
-              {call.transcript ? (
-                <TranscriptViewer segments={call.transcript} />
+              {transcript.length ? (
+                <TranscriptViewer segments={transcript} />
               ) : (
                 <p className="text-muted-foreground text-center py-8">No transcript available</p>
               )}

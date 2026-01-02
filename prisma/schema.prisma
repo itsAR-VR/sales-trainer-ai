@@ -1,0 +1,575 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum CallStatus {
+  SCHEDULED
+  IN_PROGRESS
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum SpeakerRole {
+  REP
+  PROSPECT
+  OTHER
+}
+
+enum FrameworkSource {
+  TEMPLATE
+  UPLOAD
+  CUSTOM
+}
+
+enum JobType {
+  FINALIZE_RECORDING
+  ANALYZE_CALL
+  RECONCILE_INCOMPLETE_CALLS
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  RETRYING
+}
+
+model User {
+  id            String       @id @default(uuid()) @db.Uuid
+  supabaseUserId String      @unique
+  email         String       @unique
+  name          String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  memberships   Membership[]
+  uploads       DocumentUpload[]
+  createdFrameworkVersions FrameworkVersion[] @relation("FrameworkVersionCreatedBy")
+  ownedActionItems ActionItem[] @relation("ActionItemOwner")
+}
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  description String?
+  retentionDays Int  @default(30)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships Membership[]
+  clients     Client[]
+  externalRefs ExternalRef[]
+  calls       Call[]
+  frameworks  Framework[]
+  uploads     DocumentUpload[]
+  frameworkDrafts FrameworkDraft[]
+  apiKeys     ApiKey[]
+  outboundWebhooks OutboundWebhookSubscription[]
+  embedTokens EmbedToken[]
+  jobs        Job[]
+  webhookEvents WebhookEvent[]
+  liveCoachSessions LiveCoachSession[]
+  contentStudioAssets ContentStudioAsset[]
+  whiteLabelConfig WhiteLabelConfig?
+}
+
+model Membership {
+  id        String         @id @default(uuid()) @db.Uuid
+  orgId     String         @db.Uuid
+  userId    String         @db.Uuid
+  role      MembershipRole @default(MEMBER)
+  createdAt DateTime       @default(now())
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@index([orgId])
+  @@index([userId])
+}
+
+model Client {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   String?
+  email     String?
+  phone     String?
+
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  calls      Call[]
+  externalRefs ExternalRef[]
+
+  @@index([orgId])
+}
+
+model ExternalRef {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  entityType  String
+  systemName  String
+  externalId  String
+  metadataJson Json?
+  createdAt   DateTime @default(now())
+
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  client Client?     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId String?   @db.Uuid
+
+  @@unique([orgId, systemName, entityType, externalId])
+  @@index([orgId])
+  @@index([clientId])
+}
+
+model Call {
+  id        String     @id @default(uuid()) @db.Uuid
+  orgId     String     @db.Uuid
+  clientId  String?    @db.Uuid
+  frameworkVersionId String? @db.Uuid
+  title     String
+  meetingUrl String
+  platform  String
+  scheduledAt DateTime @default(now())
+  startedAt DateTime?
+  endedAt   DateTime?
+  status    CallStatus @default(SCHEDULED)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  client Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  frameworkVersion FrameworkVersion? @relation(fields: [frameworkVersionId], references: [id], onDelete: SetNull)
+
+  recallBots      RecallBot[]
+  recordings      RecallRecording[]
+  webhookEvents   WebhookEvent[]
+  mediaAssets     MediaAsset[]
+  transcripts     Transcript[]
+  transcriptSegments TranscriptSegment[]
+  participants    Participant[]
+  liveCoachSessions LiveCoachSession[]
+
+  callSummary     CallSummary?
+  actionItems     ActionItem[]
+  frameworkScores FrameworkScore[]
+  crmExports      CRMNoteExport[]
+
+  jobs            Job[]
+
+  @@index([orgId])
+  @@index([clientId])
+  @@index([frameworkVersionId])
+  @@index([status])
+}
+
+model RecallBot {
+  id          String   @id @default(uuid()) @db.Uuid
+  callId      String   @db.Uuid
+  recallBotId String   @unique
+  status      String
+  joinAt      DateTime?
+  lastEventAt DateTime?
+  metadataJson Json?
+  createdAt   DateTime @default(now())
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+}
+
+model RecallRecording {
+  id               String   @id @default(uuid()) @db.Uuid
+  callId           String   @db.Uuid
+  recallRecordingId String  @unique
+  status           String
+  expiresAt        DateTime?
+  recallDeletedAt  DateTime?
+  mediaShortcutsJson Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+}
+
+model WebhookEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String?  @db.Uuid
+  callId     String?  @db.Uuid
+  provider   String
+  eventType  String
+  eventId    String   @unique
+  payloadJson Json
+  receivedAt DateTime @default(now())
+  processedAt DateTime?
+  status     String
+  error      String?
+
+  org  Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  call Call?         @relation(fields: [callId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([callId])
+  @@index([provider, receivedAt])
+}
+
+model MediaAsset {
+  id          String   @id @default(uuid()) @db.Uuid
+  callId      String   @db.Uuid
+  type        String
+  bucket      String
+  path        String
+  contentType String
+  sizeBytes   BigInt?
+  sha256      String?
+  etag        String?
+  verifiedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@unique([bucket, path])
+  @@index([callId])
+}
+
+model Transcript {
+  id         String   @id @default(uuid()) @db.Uuid
+  callId     String   @db.Uuid
+  rawJsonPath String?
+  rawJsonJson Json?
+  textPreview String
+  language   String?
+  createdAt  DateTime @default(now())
+
+  call     Call              @relation(fields: [callId], references: [id], onDelete: Cascade)
+  segments TranscriptSegment[]
+
+  @@index([callId])
+}
+
+model TranscriptSegment {
+  id          String     @id @default(uuid()) @db.Uuid
+  callId      String     @db.Uuid
+  transcriptId String    @db.Uuid
+  speakerLabel String
+  speakerRole  SpeakerRole @default(OTHER)
+  startMs      Int
+  endMs        Int
+  text         String
+
+  call       Call      @relation(fields: [callId], references: [id], onDelete: Cascade)
+  transcript Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+  @@index([transcriptId])
+}
+
+model Participant {
+  id          String   @id @default(uuid()) @db.Uuid
+  callId      String   @db.Uuid
+  speakerLabel String
+  speakerRole  SpeakerRole @default(OTHER)
+  name        String?
+  email       String?
+  role        String?
+  metadataJson Json?
+  createdAt   DateTime @default(now())
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@unique([callId, speakerLabel])
+  @@index([callId])
+}
+
+model Framework {
+  id        String          @id @default(uuid()) @db.Uuid
+  orgId     String          @db.Uuid
+  name      String
+  description String?
+  source    FrameworkSource @default(CUSTOM)
+  isTemplateCatalog Boolean @default(false)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  org      Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  versions FrameworkVersion[]
+
+  @@index([orgId])
+}
+
+model FrameworkVersion {
+  id              String   @id @default(uuid()) @db.Uuid
+  frameworkId     String   @db.Uuid
+  versionNumber   Int
+  createdAt       DateTime @default(now())
+  createdByUserId String?  @db.Uuid
+  isActive        Boolean  @default(false)
+
+  framework Framework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  createdBy User?      @relation("FrameworkVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  phases    FrameworkPhase[]
+  battleCards BattleCard[]
+  calls     Call[]
+  frameworkScores FrameworkScore[]
+
+  @@unique([frameworkId, versionNumber])
+  @@index([frameworkId])
+  @@index([isActive])
+}
+
+model FrameworkPhase {
+  id                String   @id @default(uuid()) @db.Uuid
+  frameworkVersionId String  @db.Uuid
+  sortOrder         Int
+  name              String
+  objective         String?
+  rubricJson        Json?
+
+  frameworkVersion FrameworkVersion @relation(fields: [frameworkVersionId], references: [id], onDelete: Cascade)
+  questions        FrameworkQuestion[]
+
+  @@unique([frameworkVersionId, sortOrder])
+  @@index([frameworkVersionId])
+}
+
+model FrameworkQuestion {
+  id      String   @id @default(uuid()) @db.Uuid
+  phaseId String   @db.Uuid
+  text    String
+  tags    String[]
+  weight  Int      @default(1)
+
+  phase FrameworkPhase @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+
+  @@index([phaseId])
+}
+
+model BattleCard {
+  id                String   @id @default(uuid()) @db.Uuid
+  frameworkVersionId String  @db.Uuid
+  triggerTags       String[]
+  title             String
+  contentJson       Json
+
+  frameworkVersion FrameworkVersion @relation(fields: [frameworkVersionId], references: [id], onDelete: Cascade)
+
+  @@index([frameworkVersionId])
+}
+
+model DocumentUpload {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  userId    String   @db.Uuid
+  bucket    String
+  path      String
+  filename  String
+  mimeType  String
+  sizeBytes BigInt
+  status    String
+  extractedTextPath String?
+  createdAt DateTime @default(now())
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  draft FrameworkDraft?
+
+  @@unique([bucket, path])
+  @@index([orgId])
+  @@index([userId])
+}
+
+model FrameworkDraft {
+  id                String   @id @default(uuid()) @db.Uuid
+  uploadId          String   @unique @db.Uuid
+  orgId             String   @db.Uuid
+  generatedSchemaJson Json
+  promptViewText    String
+  modelInfoJson     Json
+  createdAt         DateTime @default(now())
+
+  upload DocumentUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  org    Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+model CallSummary {
+  id           String   @id @default(uuid()) @db.Uuid
+  callId       String   @unique @db.Uuid
+  payloadJson  Json
+  modelInfoJson Json
+  promptVersion String
+  createdAt    DateTime @default(now())
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+}
+
+model ActionItem {
+  id          String   @id @default(uuid()) @db.Uuid
+  callId      String   @db.Uuid
+  text        String
+  status      String
+  ownerUserId String?  @db.Uuid
+  dueAt       DateTime?
+  createdAt   DateTime @default(now())
+
+  call  Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+  owner User? @relation("ActionItemOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+
+  @@index([callId])
+  @@index([ownerUserId])
+}
+
+model FrameworkScore {
+  id               String   @id @default(uuid()) @db.Uuid
+  callId           String   @db.Uuid
+  frameworkVersionId String @db.Uuid
+  payloadJson      Json
+  createdAt        DateTime @default(now())
+
+  call            Call            @relation(fields: [callId], references: [id], onDelete: Cascade)
+  frameworkVersion FrameworkVersion @relation(fields: [frameworkVersionId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+  @@index([frameworkVersionId])
+}
+
+model CRMNoteExport {
+  id          String   @id @default(uuid()) @db.Uuid
+  callId      String   @db.Uuid
+  payloadJson Json
+  createdAt   DateTime @default(now())
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+}
+
+model ApiKey {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  name      String
+  hashedKey String   @unique
+  scopes    String[]
+  createdAt DateTime @default(now())
+  lastUsedAt DateTime?
+  revokedAt DateTime?
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+model OutboundWebhookSubscription {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String   @db.Uuid
+  url        String
+  secretHash String
+  events     String[]
+  createdAt  DateTime @default(now())
+  disabledAt DateTime?
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+model EmbedToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  scope     String
+  resourceId String
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+model Job {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String   @db.Uuid
+  type       JobType
+  payloadJson Json
+  status     JobStatus @default(PENDING)
+  attempts   Int      @default(0)
+  runAt      DateTime @default(now())
+  lastError  String?
+  dedupeKey  String?  @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  call Call?        @relation(fields: [callId], references: [id], onDelete: SetNull)
+  callId String?    @db.Uuid
+
+  @@index([orgId])
+  @@index([status, runAt])
+  @@index([callId])
+}
+
+// ---------------- V2 (schema stubs) ----------------
+
+model LiveCoachSession {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String   @db.Uuid
+  callId     String?  @db.Uuid
+  status     String
+  payloadJson Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  call Call?        @relation(fields: [callId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([callId])
+}
+
+model ContentStudioAsset {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String   @db.Uuid
+  kind       String
+  payloadJson Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+model WhiteLabelConfig {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @unique @db.Uuid
+  brandJson Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}

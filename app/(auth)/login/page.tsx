@@ -5,23 +5,43 @@ import type React from "react"
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { createSupabaseBrowserClient } from "@/lib/supabase/client"
+import { useToast } from "@/hooks/use-toast"
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const { toast } = useToast()
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-    // Simulate login
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    router.push("/app/calls")
+    try {
+      const supabase = createSupabaseBrowserClient()
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
+      if (error) {
+        toast({ title: "Sign in failed", description: error.message, variant: "destructive" })
+        return
+      }
+      const next = searchParams.get("next") || "/app/calls"
+      router.push(next)
+      router.refresh()
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -38,7 +58,15 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" placeholder="you@company.com" required />
+              <Input
+                id="email"
+                type="email"
+                placeholder="you@company.com"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+              />
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -48,7 +76,14 @@ export default function LoginPage() {
                 </Link>
               </div>
               <div className="relative">
-                <Input id="password" type={showPassword ? "text" : "password"} required />
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                />
                 <Button
                   type="button"
                   variant="ghost"

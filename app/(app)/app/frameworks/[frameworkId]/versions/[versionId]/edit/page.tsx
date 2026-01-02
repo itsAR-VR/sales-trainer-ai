@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation"
 import { FrameworkBuilder } from "@/features/frameworks/framework-builder"
 import { PageHeader } from "@/components/page-header"
-import { api } from "@/lib/api"
+import { prisma } from "@/lib/prisma"
+import { requireOrgContext } from "@/src/lib/auth/context"
+import { toUiFramework, toUiFrameworkVersion } from "@/src/lib/ui/mappers"
 
 export default async function EditFrameworkVersionPage({
   params,
@@ -9,13 +11,26 @@ export default async function EditFrameworkVersionPage({
   params: Promise<{ frameworkId: string; versionId: string }>
 }) {
   const { frameworkId, versionId } = await params
-  const framework = await api.frameworks.getById(frameworkId)
+  const ctx = await requireOrgContext()
+  if (!ctx.ok) notFound()
+
+  const frameworkRow = await prisma.framework.findFirst({
+    where: { id: frameworkId, orgId: ctx.org.id },
+    include: { versions: { include: { phases: { include: { questions: true } } } } },
+  })
+  const framework = frameworkRow ? toUiFramework(frameworkRow) : null
 
   if (!framework) {
     notFound()
   }
 
-  const version = framework.versions?.find((v) => v.id === versionId)
+  const versionRow = frameworkRow?.versions.find((v) => v.id === versionId) ?? null
+  const version = versionRow
+    ? toUiFrameworkVersion({
+        ...versionRow,
+        phases: versionRow.phases,
+      } as any)
+    : null
 
   if (!version) {
     notFound()
