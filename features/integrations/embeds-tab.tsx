@@ -1,0 +1,165 @@
+"use client"
+
+import { useState } from "react"
+import { Code, ExternalLink } from "lucide-react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { CodeBlock } from "@/components/code-block"
+
+export function EmbedsTab() {
+  const [embedType, setEmbedType] = useState<"call" | "client">("call")
+  const [resourceId, setResourceId] = useState("")
+  const [theme, setTheme] = useState<"light" | "dark" | "auto">("auto")
+
+  const baseUrl = typeof window !== "undefined" ? window.location.origin : "https://app.maxout.ai"
+  const embedUrl = `${baseUrl}/embed/${embedType}s/${resourceId || "{id}"}?theme=${theme}`
+
+  const iframeCode = `<iframe
+  src="${embedUrl}"
+  width="100%"
+  height="600"
+  frameborder="0"
+  allow="fullscreen"
+  style="border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);"
+></iframe>`
+
+  const reactCode = `import { useEffect, useRef } from 'react';
+
+export function MaxOutEmbed({ ${embedType}Id, theme = 'auto' }) {
+  const iframeRef = useRef(null);
+  
+  const src = \`${baseUrl}/embed/${embedType}s/\${${embedType}Id}?theme=\${theme}\`;
+
+  return (
+    <iframe
+      ref={iframeRef}
+      src={src}
+      width="100%"
+      height="600"
+      frameBorder="0"
+      allow="fullscreen"
+      style={{ borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}
+    />
+  );
+}`
+
+  const scriptCode = `<div id="maxout-embed"></div>
+<script>
+  (function() {
+    var iframe = document.createElement('iframe');
+    iframe.src = '${embedUrl}';
+    iframe.width = '100%';
+    iframe.height = '600';
+    iframe.frameBorder = '0';
+    iframe.allow = 'fullscreen';
+    iframe.style.borderRadius = '8px';
+    iframe.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+    document.getElementById('maxout-embed').appendChild(iframe);
+  })();
+</script>`
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Embed Configuration</CardTitle>
+          <CardDescription>Generate embed code to display calls or client timelines on your website</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label>Embed Type</Label>
+              <Select value={embedType} onValueChange={(v) => setEmbedType(v as "call" | "client")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="call">Call Viewer</SelectItem>
+                  <SelectItem value="client">Client Timeline</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>{embedType === "call" ? "Call ID" : "Client ID"}</Label>
+              <Input
+                placeholder={embedType === "call" ? "call_abc123" : "client_xyz789"}
+                value={resourceId}
+                onChange={(e) => setResourceId(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Theme</Label>
+              <Select value={theme} onValueChange={(v) => setTheme(v as "light" | "dark" | "auto")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto (System)</SelectItem>
+                  <SelectItem value="light">Light</SelectItem>
+                  <SelectItem value="dark">Dark</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Preview URL</Label>
+            <div className="flex gap-2">
+              <Input value={embedUrl} readOnly className="font-mono text-sm" />
+              <Button variant="outline" asChild>
+                <a href={embedUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Embed Code</CardTitle>
+          <CardDescription>Copy the code snippet for your preferred integration method</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Tabs defaultValue="iframe" className="space-y-4">
+            <TabsList>
+              <TabsTrigger value="iframe">HTML iframe</TabsTrigger>
+              <TabsTrigger value="react">React</TabsTrigger>
+              <TabsTrigger value="script">Script Tag</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="iframe">
+              <CodeBlock code={iframeCode} language="html" />
+            </TabsContent>
+
+            <TabsContent value="react">
+              <CodeBlock code={reactCode} language="tsx" />
+            </TabsContent>
+
+            <TabsContent value="script">
+              <CodeBlock code={scriptCode} language="html" />
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      <Card className="border-dashed">
+        <CardContent className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <Code className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="font-medium mb-2">Live Preview</h3>
+            <p className="text-sm text-muted-foreground max-w-md">
+              Enter a valid {embedType} ID above to see a live preview of the embed. The embed will automatically adapt
+              to the selected theme.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
