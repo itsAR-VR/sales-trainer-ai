@@ -138,6 +138,9 @@ async function main() {
     const label = r.path
     try {
       await page.goto(r.path, { waitUntil: "domcontentloaded" })
+      // Give client-side data fetching time to settle to avoid false-positive
+      // "Failed to fetch" noise from in-flight requests during rapid navigation.
+      await page.waitForLoadState("networkidle").catch(() => {})
       await page.waitForTimeout(500)
 
       const bodyText = await page.locator("body").innerText()
@@ -170,4 +173,3 @@ async function main() {
 }
 
 await main()
-
