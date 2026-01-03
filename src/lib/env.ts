@@ -46,6 +46,15 @@ const serverEnvSchema = clientEnvSchema.extend({
 export type ClientEnv = z.infer<typeof clientEnvSchema>
 export type ServerEnv = z.infer<typeof serverEnvSchema>
 
+const serverEnvProxy = new Proxy(
+  {},
+  {
+    get() {
+      throw new Error("serverEnv was accessed in a browser bundle")
+    },
+  },
+) as unknown as ServerEnv
+
 function formatEnvError(error: z.ZodError): string {
   const byKey = new Map<string, string[]>()
   for (const issue of error.issues) {
@@ -103,9 +112,4 @@ export const env: ServerEnv | ClientEnv = typeof window === "undefined" ? parseS
 export const publicEnv: ClientEnv =
   typeof window === "undefined" ? clientEnvSchema.parse(process.env) : (env as ClientEnv)
 
-export const serverEnv: ServerEnv =
-  typeof window === "undefined"
-    ? (env as ServerEnv)
-    : (() => {
-        throw new Error("serverEnv was imported in a browser bundle")
-      })()
+export const serverEnv: ServerEnv = typeof window === "undefined" ? (env as ServerEnv) : serverEnvProxy
