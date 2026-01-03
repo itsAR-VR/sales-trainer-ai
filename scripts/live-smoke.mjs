@@ -82,6 +82,8 @@ async function main() {
 
   // 2) UI login
   await page.goto("/login", { waitUntil: "domcontentloaded" })
+  // Ensure hydration completes so form handlers are attached.
+  await page.waitForLoadState("networkidle")
   await page.fill("#email", email)
   await page.fill("#password", password)
   await Promise.all([
@@ -107,9 +109,33 @@ async function main() {
   const calls = await expectOkJson(await context.request.get(new URL("/api/calls", baseURL).toString()), "/api/calls")
   const clients = await expectOkJson(await context.request.get(new URL("/api/clients", baseURL).toString()), "/api/clients")
 
-  const callId = calls?.data?.[0]?.id
-  const clientId = clients?.data?.[0]?.id
-  if (!callId || !clientId) throw new Error("No call/client returned from /api/calls or /api/clients (seed data missing?)")
+  let callId = calls?.data?.[0]?.id
+  let clientId = clients?.data?.[0]?.id
+
+  // Fresh orgs may have no calls/clients yet. Seed a safe demo call via the API so embeds can be validated.
+  if (!callId || !clientId) {
+    const demo = await expectOkJson(
+      await context.request.post(new URL("/api/calls", baseURL).toString(), {
+        data: {
+          title: "Demo Call (smoke test)",
+          meetingUrl: "https://example.com/meet",
+          platform: "zoom",
+          createRecallBot: false,
+        },
+      }),
+      "POST /api/calls (seed demo)",
+    )
+
+    callId = callId ?? demo?.data?.id
+    clientId = clientId ?? demo?.data?.clientId
+
+    if (!clientId) {
+      const clientsAfter = await expectOkJson(await context.request.get(new URL("/api/clients", baseURL).toString()), "/api/clients (after seed)")
+      clientId = clientsAfter?.data?.[0]?.id
+    }
+  }
+
+  if (!callId || !clientId) throw new Error("No call/client available after seeding demo data")
 
   // 6) Embed tokens + embed page loads
   const callTokenResp = await expectOkJson(
