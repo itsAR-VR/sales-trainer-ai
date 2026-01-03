@@ -2,7 +2,7 @@
 
 This repo started as a v0-generated Next.js App Router UI. It’s now wired up end-to-end with:
 - Supabase Auth (email/password) + SSR middleware protection for `/app/*`
-- Supabase Postgres via Prisma (org-scoped multi-tenant schema)
+- Supabase Postgres via Prisma (org-scoped multi-tenant schema + migrations)
 - Supabase Storage via S3-compatible API (private buckets, multipart uploads, signed downloads)
 - Recall.ai webhooks (Svix signature verification) + worker to archive recordings and delete them from Recall after successful upload
 - OpenAI-powered framework extraction + post-call analysis (**models restricted to** `gpt-5-nano`, `gpt-5-mini`, `gpt-5.1`)
@@ -29,11 +29,13 @@ pnpm install
 2) Configure env
 ```bash
 cp .env.example .env.local
+# Prisma CLI loads `.env` (not `.env.local`)
+cp .env.local .env
 ```
 
-3) Push schema + seed templates
+3) Apply migrations + seed templates
 ```bash
-pnpm db:push
+pnpm db:deploy
 pnpm db:seed
 ```
 
@@ -104,11 +106,29 @@ The app uses `middleware.ts` to refresh sessions and protect `/app/*` (redirects
 
 ### 2) Database (Prisma)
 - Set `DATABASE_URL` and `DIRECT_URL` from Supabase’s Postgres connection strings.
-- Apply schema + seed:
-  - `pnpm db:push`
+- Apply migrations + seed:
+  - `pnpm db:deploy`
   - `pnpm db:seed`
 
 On first login, the server automatically creates an `Organization` + `Membership` if none exist and ensures framework templates exist (no client-side org storage).
+
+#### Migrations (important)
+
+This repo uses Prisma migrations (`prisma/migrations/*`).
+
+- Create a new migration locally:
+  - `pnpm db:migrate`
+- Apply migrations in a non-interactive environment (prod/CI):
+  - `pnpm db:deploy`
+
+**If your database was previously created with `prisma db push`:**
+You must baseline the existing DB once so Prisma doesn’t try to re-create tables.
+
+```bash
+pnpm prisma migrate resolve --applied 20260103000000_init
+```
+
+Prisma CLI note: it reads `.env` by default, so keep `.env` in sync with `.env.local` (do not commit either).
 
 ### 3) Storage buckets (private)
 
@@ -204,6 +224,29 @@ Model usage is **guaranteed** by env validation + model picker:
 - `gpt-5.1` — complex extraction/scoring (framework scoring + structured tasks)
 
 All AI outputs are JSON-only and validated with zod schemas before writing to the database.
+
+## Deploying (Vercel / ZRG)
+
+This project is deployed on Vercel under the `zrg` scope/workspace.
+
+Key commands:
+```bash
+vercel link --scope zrg --project sales-trainer-ai --yes
+vercel deploy --prod --scope zrg
+vercel inspect https://sales-trainer-ai-two.vercel.app --scope zrg
+vercel inspect https://sales-trainer-ai-two.vercel.app --scope zrg --logs
+```
+
+Vercel runs the `vercel-build` script from `package.json`, which includes:
+- `prisma migrate deploy` (apply migrations)
+- `next build`
+
+## QA scripts (live)
+
+- Smoke test (logs in, checks core APIs, validates embeds):
+  - `pnpm live:smoke`
+- Deep route QA (captures screenshots under `artifacts/deep-qa/`):
+  - `pnpm live:deep-qa`
 
 ## Frameworks
 
