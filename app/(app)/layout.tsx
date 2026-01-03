@@ -3,6 +3,9 @@ import { AppShell } from "@/components/app-shell"
 import { redirect } from "next/navigation"
 import { requireOrgContext } from "@/src/lib/auth/context"
 
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const ctx = await requireOrgContext()
   if (!ctx.ok) redirect("/login")

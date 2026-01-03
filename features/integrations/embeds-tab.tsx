@@ -120,11 +120,17 @@ export function MaxOutEmbed({ ${embedType}Id, theme = 'auto' }) {
             <Label>Preview URL</Label>
             <div className="flex gap-2">
               <Input value={previewUrl} readOnly className="font-mono text-sm" />
-              <Button variant="outline" asChild>
-                <a href={previewUrl.replace("{token}", "")} target="_blank" rel="noopener noreferrer">
+              {embedUrl ? (
+                <Button variant="outline" asChild>
+                  <a href={embedUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                </Button>
+              ) : (
+                <Button variant="outline" disabled title="Generate a token first">
                   <ExternalLink className="h-4 w-4" />
-                </a>
-              </Button>
+                </Button>
+              )}
             </div>
             <div className="flex justify-end">
               <Button
@@ -182,14 +188,31 @@ export function MaxOutEmbed({ ${embedType}Id, theme = 'auto' }) {
 
       <Card className="border-dashed">
         <CardContent className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <Code className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="font-medium mb-2">Live Preview</h3>
-            <p className="text-sm text-muted-foreground max-w-md">
-              Enter a valid {embedType} ID above to see a live preview of the embed. The embed will automatically adapt
-              to the selected theme.
-            </p>
-          </div>
+          {embedUrl ? (
+            <div className="w-full">
+              <div className="text-center mb-6">
+                <h3 className="font-medium mb-2">Live Preview</h3>
+                <p className="text-sm text-muted-foreground">
+                  This preview uses the generated token and will expire based on the selected settings.
+                </p>
+              </div>
+              <iframe
+                src={embedUrl}
+                title="MaxOut Embed Preview"
+                className="w-full rounded-lg border"
+                style={{ height: 600 }}
+                allow="fullscreen"
+              />
+            </div>
+          ) : (
+            <div className="text-center">
+              <Code className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="font-medium mb-2">Live Preview</h3>
+              <p className="text-sm text-muted-foreground max-w-md">
+                Enter a valid {embedType} ID, then generate a token to preview the embed.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

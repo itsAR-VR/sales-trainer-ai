@@ -1,5 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
+import { execSync } from "node:child_process"
 
 function parseDotenv(content) {
   const env = {}
@@ -38,6 +39,27 @@ function loadEnv() {
   }
 }
 
+function getLocalGitSha() {
+  try {
+    return execSync("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString("utf8").trim()
+  } catch {
+    return null
+  }
+}
+
+async function expectOkJson(resp, label) {
+  const status = resp.status()
+  const contentType = resp.headers()["content-type"] || ""
+  const text = await resp.text()
+  if (status !== 200) {
+    throw new Error(`${label} returned ${status}: ${text.slice(0, 200)}`)
+  }
+  if (!contentType.includes("application/json")) {
+    throw new Error(`${label} returned unexpected content-type (${contentType}): ${text.slice(0, 200)}`)
+  }
+  return JSON.parse(text)
+}
+
 async function main() {
   const { chromium } = await import("playwright")
 
@@ -52,6 +74,13 @@ async function main() {
   const context = await browser.newContext({ baseURL })
   const page = await context.newPage()
 
+  // 1) Verify auth protection when logged out.
+  await page.goto("/app/calls", { waitUntil: "domcontentloaded" })
+  if (!page.url().includes("/login")) {
+    throw new Error(`Expected /app/calls to redirect to /login when logged out, but landed on: ${page.url()}`)
+  }
+
+  // 2) UI login
   await page.goto("/login", { waitUntil: "domcontentloaded" })
   await page.fill("#email", email)
   await page.fill("#password", password)
@@ -63,13 +92,58 @@ async function main() {
   await page.goto("/app/calls", { waitUntil: "domcontentloaded" })
   if (page.url().includes("/login")) throw new Error("Redirected to /login after attempting login when visiting /app/calls")
 
-  const healthResp = await context.request.get(new URL("/api/health", baseURL).toString())
-  if (healthResp.status() !== 200) {
-    throw new Error(`/api/health returned ${healthResp.status()}: ${(await healthResp.text()).slice(0, 200)}`)
+  // 3) Health + deploy sanity
+  const localGitSha = getLocalGitSha()
+  const health = await expectOkJson(await context.request.get(new URL("/api/health", baseURL).toString()), "/api/health")
+  if (localGitSha && health.gitSha && health.gitSha !== localGitSha) {
+    throw new Error(`Deployment mismatch: live gitSha=${health.gitSha} but local HEAD=${localGitSha} (redeploy expected commit)`)
   }
 
+  // 4) Authenticated API checks
+  await expectOkJson(await context.request.get(new URL("/api/me", baseURL).toString()), "/api/me")
+  await expectOkJson(await context.request.get(new URL("/api/admin/storage", baseURL).toString()), "/api/admin/storage")
+
+  // 5) Fetch a call + client id
+  const calls = await expectOkJson(await context.request.get(new URL("/api/calls", baseURL).toString()), "/api/calls")
+  const clients = await expectOkJson(await context.request.get(new URL("/api/clients", baseURL).toString()), "/api/clients")
+
+  const callId = calls?.data?.[0]?.id
+  const clientId = clients?.data?.[0]?.id
+  if (!callId || !clientId) throw new Error("No call/client returned from /api/calls or /api/clients (seed data missing?)")
+
+  // 6) Embed tokens + embed page loads
+  const callTokenResp = await expectOkJson(
+    await context.request.post(new URL("/api/integrations/embeds/token", baseURL).toString(), {
+      data: { scope: "call", resourceId: callId, expiresHours: 1 },
+    }),
+    "POST /api/integrations/embeds/token (call)",
+  )
+
+  const clientTokenResp = await expectOkJson(
+    await context.request.post(new URL("/api/integrations/embeds/token", baseURL).toString(), {
+      data: { scope: "client", resourceId: clientId, expiresHours: 1 },
+    }),
+    "POST /api/integrations/embeds/token (client)",
+  )
+
+  const callEmbedUrl = callTokenResp?.data?.embedUrl
+  const clientEmbedUrl = clientTokenResp?.data?.embedUrl
+  if (!callEmbedUrl || !clientEmbedUrl) throw new Error("Embed token response missing embedUrl")
+
+  // Missing token should 404 (no 500s).
+  const missingCallEmbed = await context.request.get(new URL(`/embed/calls/${callId}`, baseURL).toString())
+  if (![404].includes(missingCallEmbed.status())) {
+    throw new Error(`/embed/calls/${callId} without token should be 404, got ${missingCallEmbed.status()}`)
+  }
+
+  await page.goto(callEmbedUrl, { waitUntil: "domcontentloaded" })
+  if (!page.url().includes(`/embed/calls/${callId}`)) throw new Error("Failed to load call embed page")
+
+  await page.goto(clientEmbedUrl, { waitUntil: "domcontentloaded" })
+  if (!page.url().includes(`/embed/clients/${clientId}`)) throw new Error("Failed to load client embed page")
+
   await browser.close()
-  process.stdout.write("LIVE SMOKE OK: UI login + /app/calls + /api/health\n")
+  process.stdout.write("LIVE SMOKE OK: auth redirect + UI login + /api/health + /api/me + /api/admin/storage + embeds\n")
 }
 
 await main()
