@@ -82,7 +82,13 @@ function parseServerEnv(): ServerEnv {
 }
 
 function parseClientEnv(): ClientEnv {
-  const parsed = clientEnvSchema.safeParse(process.env)
+  // In Next.js client bundles, only `process.env.NEXT_PUBLIC_*` property accesses are inlined.
+  // Do not rely on the shape/contents of `process.env` as an object at runtime.
+  const parsed = clientEnvSchema.safeParse({
+    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  })
   if (!parsed.success) throw new Error(formatEnvError(parsed.error))
   return parsed.data
 }
