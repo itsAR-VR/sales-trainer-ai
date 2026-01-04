@@ -1,0 +1,584 @@
+Below is a **final, end-to-end plan** that incorporates everything you’ve specified:
+
+* **Clone of MaxOut.ai’s category/product** (framework-based sales coaching + CRM notes + call library + integrations), with **V2** adding **live coaching**, **content generation**, and **white-label**.
+* **Recall.ai** for meeting bots / transcription / recordings (capture layer).
+* **Supabase (Postgres) + Prisma** as your primary backend datastore.
+* **Supabase Storage** as *your* media host (you download from Recall, upload to Supabase Storage, then delete from Recall to avoid retention charges after 7 days).
+* **Next.js** for the primary UI.
+* A **platform API + embed** strategy so other dashboards/projects can plug in and display calls, transcripts, scoring, and insights.
+
+Where relevant, I’ve grounded this in Recall + Supabase docs (webhooks, retention, media URLs, deletion endpoints, S3 uploads, etc.). ([Recall.ai][1])
+
+---
+
+# 1) Product scope and phasing
+
+## V1 (Phase I): “Complete platform” without live coaching/content/white-label
+
+V1 will deliver:
+
+### A) Call capture + media hosting (your storage)
+
+* Send Recall bots to meetings and receive status via webhooks. ([Recall.ai][2])
+* Fetch **post-call** artifacts (video/audio/transcript/participants/metadata). ([Recall.ai][3])
+* Upload media to **Supabase Storage** (private buckets).
+* Immediately delete Recall recording media after successful upload to avoid storage charges beyond the free retention window. Recall supports deleting a recording and its associated media. ([Recall.ai][4])
+
+### B) Call library + transcript viewer + playback
+
+* Searchable call list
+* Call detail: video playback, transcript, speakers, key moments
+
+### C) Framework system (core differentiator in V1)
+
+* Built-in **framework library** from your licensed guru ebooks (preloaded templates)
+* **Custom framework builder** (phases, questions, rubrics, battle cards)
+* **AI-assisted extraction**: upload document → system generates a structured “framework draft” (and optionally shows the prompt) → user edits in builder → saves a versioned framework
+
+### D) Post-call analysis aligned to frameworks
+
+* Auto summary + action items
+* Framework coverage scoring (e.g., which key questions were asked, missed steps, recommended next-call agenda)
+* Structured “CRM Notes Object” export payload
+
+### E) Integrations to your other dashboards/projects
+
+* Tenant-aware **API** (internal/external)
+* **Outbound webhooks** (events like transcript ready, summary ready, score ready)
+* **Embeddable call viewer** (iframe-first + optional React SDK later)
+
+---
+
+## V2 (Phase II): Live coaching + content generation + white-label
+
+You will **prepare the schema and internal event plumbing** in V1, but not implement the UI/logic until V2.
+
+### V2 modules
+
+* **Live coaching** using Recall real-time endpoints (webhook/websocket) with low-latency transcription mode when needed (Recall notes webhooks can be delayed 3–10 minutes unless mode is set to prioritize low latency). ([Recall.ai][5])
+* **Content generation** (emails, follow-ups, scripts, “voice of customer” snippets, etc.)
+* **White-label** (custom domains, theme, branding, per-tenant experiences)
+
+---
+
+# 2) Key design decision you made: “We host media; Recall is transient”
+
+This becomes a **first-class workflow** of the platform.
+
+## Recall retention + charges you must design around
+
+Recall’s docs explain:
+
+* Storage can be configured via `recording_config.retention`.
+* The first **7 days are free**; after that, you’re charged for extended retention. ([Recall.ai][1])
+* Accounts created after **June 12, 2025** default to retaining media forever unless you explicitly configure retention. ([Recall.ai][6])
+* Media can be deleted any time via **Delete Recording** or **Delete Bot Media**, and deletion is permanent. ([Recall.ai][1])
+* Recall does **not** store directly to your bucket; you must download and re-upload yourself. ([Recall.ai][1])
+
+**V1 requirement:** every recording must be copied into Supabase Storage and then deleted from Recall automatically (or at least before the free window ends).
+
+---
+
+# 3) Final architecture
+
+## High-level components
+
+1. **Next.js App (Web/UI)**
+
+   * Call library, call detail, framework builder, admin settings, integrations config
+2. **API Layer (Next.js Route Handlers or separate Node service)**
+
+   * Creates bots, receives webhooks, issues embed tokens, generates signed playback URLs, handles framework CRUD, analysis endpoints
+3. **Webhook Receiver**
+
+   * Public endpoint(s) for Recall status-change + recording/media webhooks
+   * Stores raw events + enqueues jobs (never heavy compute inline)
+4. **Worker Service**
+
+   * Downloads Recall artifacts (video/audio/transcript/events)
+   * Uploads to Supabase Storage via S3 multipart (server-optimized)
+   * Deletes Recall recording when safe
+   * Runs post-call analysis (summary/scoring)
+5. **Supabase Postgres + Prisma**
+
+   * Tenancy, calls, frameworks, analysis outputs, audit logs, jobs, integration config
+6. **Supabase Storage (Private buckets)**
+
+   * Stores mp4/mp3, transcript JSON (optionally gzipped), participant events, uploaded framework documents
+
+---
+
+# 4) Recall.ai integration (V1)
+
+## 4.1 Webhooks you must implement
+
+Recall documents that recording status and media object status webhooks are delivered via Svix. ([Recall.ai][3])
+
+Implement at minimum:
+
+* **Bot status change webhooks** (lifecycle; delivered via Svix) ([Recall.ai][2])
+* **Recording status webhooks** ([Recall.ai][3])
+* **Media object status webhooks** (includes `transcript`, `video_mixed`, `audio_mixed`, `participant_events`, `meeting_metadata`, etc.) ([Recall.ai][3])
+
+### Webhook verification (must-do)
+
+Svix signature verification requires the **raw request body**—JSON parsing/re-stringifying can break signature verification. ([Svix Docs][7])
+
+**Implementation rule:** webhook handler does:
+
+1. `raw = await req.text()`
+2. verify signature
+3. `payload = JSON.parse(raw)`
+4. store + enqueue job
+5. respond 200 quickly
+
+## 4.2 Bot creation and scheduling
+
+* Use `join_at` scheduling when possible; Recall indicates scheduled bots are guaranteed to join on time when `join_at` is >10 minutes out. ([Recall.ai][8])
+
+## 4.3 Recording configuration for your “download-then-delete” approach
+
+In Create Bot, explicitly set:
+
+* `recording_config.retention` to a **timed** window (≤ 168 hours / 7 days) to avoid retention charges if your delete workflow fails. ([Recall.ai][1])
+
+Then, after you successfully upload to Supabase:
+
+* call **Delete Recording** to purge Recall media. Deleting a recording deletes associated transcripts/participant data too. ([Recall.ai][4])
+
+## 4.4 Retrieving the media you need
+
+Recall provides unified access via `media_shortcuts` on recording retrieval, including `video_mixed` with a `download_url`. ([Recall.ai][9])
+
+Important constraints:
+
+* Recall download URLs are signed and expire (their docs mention expiration; example guidance references 5-hour signed URLs in playback guidance). ([Recall.ai][10])
+* Therefore your worker should fetch fresh download URLs right before download.
+
+---
+
+# 5) Supabase Storage strategy (server-side ingestion + secure playback)
+
+## 5.1 Storage upload method: use S3 protocol + multipart for server ingestion
+
+Supabase Storage supports S3 protocol, including multipart uploads (recommended for server-side large files). ([Supabase][11])
+
+Also note:
+
+* Standard uploads have practical constraints; Supabase recommends resumable or S3 for reliability on larger files. ([Supabase][12])
+* Paid plans allow much larger global max file size than Free (Free max is tiny for recordings). ([Supabase][13])
+
+### Security warning for S3 keys
+
+Supabase S3 access keys **bypass RLS** and provide full access; they must only be used server-side. ([Supabase][14])
+
+**Plan:**
+
+* Worker uses S3 keys for uploads (fast, reliable, streaming-friendly).
+* Client never sees S3 keys.
+
+## 5.2 Bucket layout (private by default)
+
+Use private buckets (best for customer call recordings). Supabase buckets are private by default and access is governed via policies or signed URLs. ([Supabase][15])
+
+Recommended buckets:
+
+* `recordings-video` (mp4)
+* `recordings-audio` (mp3)
+* `transcripts` (json/gz)
+* `participant-events` (json)
+* `meeting-metadata` (json)
+* `framework-uploads` (original docs)
+* `exports` (optional: PDF/CSV exports later)
+
+Path convention:
+
+```
+org/{orgId}/calls/{callId}/recording/{recordingId}/video.mp4
+org/{orgId}/calls/{callId}/recording/{recordingId}/transcript.json.gz
+...
+```
+
+## 5.3 Playback access pattern
+
+Two viable patterns:
+
+### Pattern A (recommended): server issues short-lived signed URLs
+
+* Web UI requests `GET /api/calls/{id}/playback-url`
+* Server verifies org membership
+* Server returns a signed URL (Supabase signed URL or S3 presigned GET)
+
+This keeps authorization centralized.
+
+### Pattern B: proxy streaming through your server
+
+Only if you hit range/compatibility issues in some environments. More expensive.
+
+---
+
+# 6) The “download → upload → delete Recall” pipeline (core V1 workflow)
+
+This is the heart of your platform reliability.
+
+## 6.1 State machine (Call + Recording)
+
+You will track both:
+
+* Call lifecycle (scheduled, in-progress, ended, processing, ready, failed)
+* Artifact lifecycle (video, audio, transcript, participants, metadata)
+
+## 6.2 Worker orchestration (idempotent, retryable)
+
+When you receive relevant webhook(s):
+
+1. Store `WebhookEvent` (raw payload)
+2. Enqueue `FinalizeRecordingJob(callId, recallRecordingId)`
+
+**FinalizeRecordingJob steps:**
+
+1. Retrieve the recording/bot to get `media_shortcuts` (video_mixed, audio_mixed, transcript, participant_events, meeting_metadata) ([Recall.ai][9])
+2. For each artifact required:
+
+   * fetch `download_url`
+   * stream download → upload to Supabase via S3 multipart
+   * store `MediaAsset` record with size/hash
+3. Verify assets exist in Supabase (HEAD object, size match)
+4. Mark recording as `archived_to_supabase = true`
+5. **Delete from Recall**:
+
+   * call Delete Recording (preferred; targeted) ([Recall.ai][4])
+6. Trigger post-call analysis jobs.
+
+### Safety rules
+
+* Never delete Recall recording until *all required artifacts* are confirmed in Supabase.
+* If download/upload fails, retry; Recall retention config gives you a safety window. ([Recall.ai][1])
+
+---
+
+# 7) Data model (Prisma-first, Supabase Postgres)
+
+Below is the schema blueprint. This is not “extra”—it’s what prevents rework later, especially for V2 readiness.
+
+## 7.1 Tenancy + identity
+
+* `User` (supabase_user_id, email, name)
+* `Organization` (name, slug, plan)
+* `Membership` (userId, orgId, role)
+
+## 7.2 Clients + “plug into other dashboards”
+
+* `Client` (orgId, name, externalRefs JSON)
+* `ExternalRef` (orgId, systemName, externalId, entityType, metadata)
+
+  * allows your other dashboards to link their client/deal entities to calls in your platform
+
+## 7.3 Calls and Recall entities
+
+* `Call` (orgId, clientId?, title, scheduledAt?, startedAt?, endedAt?, status, meetingUrl, platform)
+* `RecallBot` (callId, recallBotId, joinAt?, status, lastEventAt)
+* `RecallRecording` (callId, recallRecordingId, status, expiresAt?, recallDeletedAt?)
+
+Recall exposes `expires_at` in recording objects and media expiration behavior. ([Recall.ai][1])
+
+## 7.4 Media assets (Supabase-hosted)
+
+* `MediaAsset`
+
+  * `callId`
+  * `type` enum: `VIDEO_MIXED`, `AUDIO_MIXED`, `TRANSCRIPT`, `PARTICIPANT_EVENTS`, `MEETING_METADATA`
+  * `bucket`, `path`, `sizeBytes`, `sha256`, `contentType`
+  * `createdAt`, `verifiedAt`
+
+## 7.5 Frameworks (versioned, editable, templated)
+
+* `Framework` (orgId, name, source: `TEMPLATE` | `UPLOAD` | `CUSTOM`)
+* `FrameworkVersion` (frameworkId, versionNumber, createdByUserId, createdAt, isActive)
+* `FrameworkPhase` (frameworkVersionId, order, name, objective, rubric JSON)
+* `FrameworkQuestion` (phaseId, text, tags, weight)
+* `BattleCard` (frameworkVersionId, triggerTags, title, content JSON)
+
+**Rule:** calls link to a **FrameworkVersion**, not a mutable framework, so historical scores never “shift.”
+
+## 7.6 Framework uploads + AI extraction
+
+* `DocumentUpload`
+
+  * orgId, userId
+  * bucket/path to original doc
+  * extractedText (or pointer to extracted text file)
+  * status
+* `FrameworkDraft`
+
+  * uploadId
+  * generatedSchema JSON (the structured framework draft)
+  * generationPrompt (optional: what you show users as “the prompt”)
+  * modelInfo, tokenUsage, createdAt
+* `FrameworkDraftEdit`
+
+  * user edits tracking (optional)
+* `FrameworkVersion` created from a draft on “Save”
+
+## 7.7 Post-call analysis outputs
+
+* `CallSummary` (callId, payload JSON, modelInfo, promptVersion)
+* `ActionItem` (callId, text, ownerUserId?, dueAt?, status)
+* `FrameworkScore`
+
+  * callId, frameworkVersionId
+  * payload JSON (phase coverage, missed questions, coaching suggestions, score)
+* `CRMNoteExport`
+
+  * callId
+  * structuredPayload JSON (fields your dashboards/CRMs ingest)
+
+## 7.8 Integrations + embeds
+
+* `ApiKey` (orgId, name, hashedKey, scopes, createdAt, revokedAt)
+* `OutboundWebhookSubscription`
+
+  * orgId, url, secret, subscribedEventTypes
+* `EmbedToken`
+
+  * orgId, scope (`CALL_VIEW`, `CLIENT_TIMELINE`)
+  * resourceId
+  * expiresAt
+  * tokenHash, revokedAt
+
+## 7.9 Reliability + observability
+
+* `WebhookEvent`
+
+  * provider (`RECALL`)
+  * eventType, eventId (unique), receivedAt
+  * payload JSONB (raw + parsed)
+  * processedAt, status, error
+* `Job`
+
+  * type, payload, status, attempts, lastError, runAt
+
+## 7.10 V2 readiness tables (placeholders only)
+
+* `LiveCoachingEvent` (callId, type, payload, createdAt) — empty in V1
+* `SuggestedPrompt` (callId, scope, payload) — empty in V1
+* `GeneratedAsset` (callId/orgId, type, payload, status) — for content generation
+* `BrandingConfig` (orgId, theme JSON, customDomain, logoPath) — for white label
+
+---
+
+# 8) Framework builder + AI-assisted extraction (your exact workflow, but made robust)
+
+You said:
+
+> They upload the document, we give them a prompt from that document to use as a framework builder, they edit and save.
+
+**Final recommended implementation (matches your intent, but avoids brittle UX):**
+
+1. User uploads document → stored in `framework-uploads` bucket
+2. You extract text (PDF/DOCX parsing)
+3. AI produces:
+
+   * a **structured framework JSON draft** (strict schema)
+   * an **optional “prompt view”** that users can copy/modify
+4. UI opens Framework Builder with the draft loaded
+5. User edits phases/questions/rubrics
+6. On save, create `FrameworkVersion` (immutable snapshot)
+7. Optionally allow “re-run extraction” and create a new draft
+
+**Hard requirements:**
+
+* schema validation before save
+* “confidence flags” for questionable parts
+* no silent overwrites (draft → version; versions immutable)
+
+---
+
+# 9) Post-call analysis pipeline (V1)
+
+Triggered after media is safely stored in Supabase:
+
+1. **Normalize transcript**
+
+   * store raw transcript JSON (for audit)
+   * store `transcript_text` field for search / preview
+2. **Summarize**
+
+   * summary
+   * action items
+3. **Framework scoring**
+
+   * map transcript content to phases/questions
+   * produce coverage + missed questions + improvement plan
+4. **CRM export object**
+
+   * structured output to feed your other dashboards/CRMs
+
+Optional V1 enhancement:
+
+* embeddings + semantic search (“Ask your calls”) can be added when ready, but it’s not required for the foundation.
+
+---
+
+# 10) “Plug into other dashboards/projects” plan (first-class)
+
+## 10.1 Platform API
+
+Core endpoints:
+
+* `POST /v1/calls` (create / register a call + link client)
+* `POST /v1/bots` (send Recall bot)
+* `GET /v1/calls?clientExternalId=...`
+* `GET /v1/calls/{id}` (metadata + statuses)
+* `GET /v1/calls/{id}/transcript`
+* `GET /v1/calls/{id}/summary`
+* `GET /v1/calls/{id}/scores`
+* `POST /v1/frameworks` / `GET /v1/frameworks`
+
+Auth:
+
+* User JWT for your first-party app
+* API keys for dashboards/services (scoped + revocable)
+
+## 10.2 Embeddable UI (iframe-first)
+
+* `/embed/calls/{callId}?token=...`
+* token is short-lived, scoped, revocable
+
+## 10.3 Outbound webhooks
+
+Event types:
+
+* `call.created`
+* `bot.joined`
+* `call.recording_ready`
+* `call.media_archived` (Supabase upload complete)
+* `call.summary_ready`
+* `call.framework_score_ready`
+* `call.deleted`
+
+All outbound webhooks signed with HMAC secret and include replay protection.
+
+---
+
+# 11) Security and privacy
+
+## 11.1 Webhook authenticity
+
+* Verify Svix signatures using raw body ([Svix Docs][7])
+
+## 11.2 Media access control
+
+* Keep buckets private
+* Only serve playback URLs after authorization checks
+* Short-lived signed URLs (server-generated)
+
+## 11.3 Retention and deletion controls
+
+* Org-level retention settings (e.g., keep recordings 6 months / 1 year / forever)
+* Hard-delete pipelines:
+
+  * delete DB artifacts
+  * delete storage objects
+  * ensure Recall deletion already happened (or do it if still present)
+
+## 11.4 Tenant isolation
+
+* Every query scoped by `orgId`
+* Add automated tests that validate cross-tenant access is impossible
+
+---
+
+# 12) Implementation roadmap (step-by-step build order)
+
+This is the order that minimizes rework and directly supports your “Recall → Supabase Storage → delete Recall” requirement.
+
+## Step 1 — Foundation
+
+* Next.js app + Supabase Auth + org/membership
+* Prisma schema + migrations (tenancy + calls + webhooks + jobs + media assets)
+
+## Step 2 — Recall integration (capture + webhooks)
+
+* Create bot endpoint (manual meeting URL V1; calendar later)
+* Webhook receiver with signature verification and event store ([Svix Docs][7])
+* Status UI: call timeline (queued/joined/recording/processing/done)
+
+## Step 3 — Media archival pipeline (download/upload/delete)
+
+* Worker service
+* For each completed recording:
+
+  * retrieve media shortcuts ([Recall.ai][9])
+  * download artifacts
+  * upload to Supabase via S3 multipart ([Supabase][11])
+  * verify
+  * delete Recall recording ([Recall.ai][4])
+* Mark call ready for playback
+
+## Step 4 — Call library UI
+
+* Call list
+* Call detail with playback + transcript viewer
+* Server endpoint for signed playback URLs
+
+## Step 5 — Framework builder (manual)
+
+* Framework template library (your licensed guru frameworks)
+* Custom builder CRUD
+* Versioning model enforced
+
+## Step 6 — AI-assisted extraction workflow
+
+* Upload doc → extract text → generate structured draft + prompt view → open builder → save version
+
+## Step 7 — Post-call analysis
+
+* Summary + action items
+* Framework scoring + coaching plan
+* CRM export object
+
+## Step 8 — Integrations for your other dashboards
+
+* API keys + scopes
+* Embeddable call viewer (iframe)
+* Outbound webhook subscriptions
+
+## Step 9 — Hardening
+
+* Reconciliation job (find incomplete calls and retry downloads before retention window closes)
+* Admin debug console (webhook log + job history)
+* Cost monitoring (Recall usage endpoint optional; internal storage usage reporting) ([Recall.ai][16])
+
+---
+
+# 13) V2 execution plan (already schema-ready from V1)
+
+## Live coaching (V2)
+
+* Configure Recall real-time endpoints (webhook/websocket) ([Recall.ai][17])
+* Ensure low latency transcription mode when needed (otherwise 3–10 minute delays on real-time webhook transcription). ([Recall.ai][5])
+* Stream coaching prompts into “Coach Console” UI
+* Store `LiveCoachingEvent` + `SuggestedPrompt` for replay and analytics
+
+## Content generation (V2)
+
+* Store `GeneratedAsset` (emails, scripts, posts, etc.)
+* Allow template systems per org + brand voice settings
+
+## White-label (V2)
+
+* `BrandingConfig` per org
+* Custom domains + theming + role-based “coach portal” / “client portal”
+
+---
+
+# 14) The 5 non-negotiable engineering rules for this build
+
+1. **Webhook handler must be fast and idempotent**
+2. **Never delete Recall recording until Supabase uploads are verified**
+3. **Frameworks must be versioned (immutable versions)**
+4. **All data access must be org-scoped + tested**
+5. **S3 keys stay server-only** (Supabase S3 keys bypass RLS) ([Supabase][14])
+
+---
