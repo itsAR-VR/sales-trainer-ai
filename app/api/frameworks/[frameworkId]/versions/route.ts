@@ -41,7 +41,8 @@ export async function POST(request: Request, context: { params: Promise<{ framew
 
     const nextVersionNumber = (framework.versions.map((v) => v.versionNumber).sort((a, b) => b - a)[0] ?? 0) + 1
 
-    const versionId = await prisma.$transaction(async (tx) => {
+    const versionId = await prisma.$transaction(
+      async (tx) => {
       if (parsed.data.makeActive) {
         await tx.frameworkVersion.updateMany({ where: { frameworkId, isActive: true }, data: { isActive: false } })
       }
@@ -62,12 +63,21 @@ export async function POST(request: Request, context: { params: Promise<{ framew
           },
           select: { id: true },
         })
-        for (const q of phase.questions) {
-          await tx.frameworkQuestion.create({ data: { phaseId: createdPhase.id, text: q.text, tags: q.tags, weight: q.weight } })
+        if (phase.questions.length) {
+          await tx.frameworkQuestion.createMany({
+            data: phase.questions.map((q) => ({
+              phaseId: createdPhase.id,
+              text: q.text,
+              tags: q.tags,
+              weight: q.weight,
+            })),
+          })
         }
       }
       return version.id
-    })
+      },
+      { maxWait: 10_000, timeout: 60_000 },
+    )
 
     return NextResponse.json({ data: { versionId } })
   } catch (e) {

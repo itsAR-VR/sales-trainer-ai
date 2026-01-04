@@ -240,7 +240,8 @@ async function main() {
   await page.waitForLoadState("networkidle").catch(() => {})
   await page.getByRole("tab", { name: "Framework" }).click()
 
-  await page.getByRole("button", { name: "Select a framework" }).click()
+  // Radix Select trigger isn't always exposed as a named button; click the placeholder text instead.
+  await page.getByText("Select a framework").click()
   await page.getByRole("option", { name: frameworkName }).click()
   await page.getByRole("button", { name: "Apply" }).click()
   await page.getByText("Framework applied").waitFor({ timeout: 30000 })
