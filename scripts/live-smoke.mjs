@@ -109,8 +109,11 @@ async function main() {
   const calls = await expectOkJson(await context.request.get(new URL("/api/calls", baseURL).toString()), "/api/calls")
   const clients = await expectOkJson(await context.request.get(new URL("/api/clients", baseURL).toString()), "/api/clients")
 
-  let callId = calls?.data?.[0]?.id
-  let clientId = clients?.data?.[0]?.id
+  const callList = calls?.data ?? []
+  const callWithoutFramework = callList.find((c) => !c?.frameworkScore)
+
+  let callId = callWithoutFramework?.id ?? callList?.[0]?.id
+  let clientId = callWithoutFramework?.clientId ?? clients?.data?.[0]?.id
 
   // Fresh orgs may have no calls/clients yet. Seed a safe demo call via the API so embeds can be validated.
   if (!callId || !clientId) {
@@ -196,12 +199,41 @@ async function main() {
   ])
 
   await page.fill("#framework-name", frameworkName)
-  await Promise.all([
-    page.waitForURL(/\/app\/frameworks\/[0-9a-f-]+/i, { timeout: 120000, waitUntil: "domcontentloaded" }),
+  const [createFrameworkResp] = await Promise.all([
+    page.waitForResponse((resp) => {
+      try {
+        const u = new URL(resp.url())
+        return resp.request().method() === "POST" && u.pathname === "/api/frameworks"
+      } catch {
+        return false
+      }
+    }),
     page.getByRole("button", { name: "Save Framework" }).click(),
   ])
 
-  // Client navigation can briefly show loading UI; wait until the framework name renders.
+  const createdText = await createFrameworkResp.text()
+  if (!createFrameworkResp.ok()) {
+    throw new Error(`Create framework failed (${createFrameworkResp.status()}): ${createdText.slice(0, 200)}`)
+  }
+  const createdJson = JSON.parse(createdText)
+  const frameworkId = createdJson?.data?.id
+  if (!frameworkId) throw new Error("Create framework response missing framework id")
+
+  // Wait for the version save to complete, then navigate to the framework page directly.
+  const versionSaveResp = await page.waitForResponse((resp) => {
+    try {
+      const u = new URL(resp.url())
+      return resp.request().method() === "POST" && u.pathname === `/api/frameworks/${frameworkId}/versions`
+    } catch {
+      return false
+    }
+  })
+  if (!versionSaveResp.ok()) {
+    const text = await versionSaveResp.text().catch(() => "")
+    throw new Error(`Save framework version failed (${versionSaveResp.status()}): ${text.slice(0, 200)}`)
+  }
+
+  await page.goto(`/app/frameworks/${frameworkId}`, { waitUntil: "domcontentloaded" })
   await page.getByText(frameworkName).first().waitFor({ timeout: 120000 })
 
   await page.goto(`/app/calls/${callId}`, { waitUntil: "domcontentloaded" })

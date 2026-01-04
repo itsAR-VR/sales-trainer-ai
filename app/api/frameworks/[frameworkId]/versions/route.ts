@@ -28,40 +28,50 @@ export async function POST(request: Request, context: { params: Promise<{ framew
   const ctx = await requireOrgContext()
   if (!ctx.ok) return NextResponse.json({ error: { code: "UNAUTHORIZED", message: "Not signed in" } }, { status: 401 })
 
-  const { frameworkId } = await context.params
-  const framework = await prisma.framework.findFirst({
-    where: { id: frameworkId, orgId: ctx.org.id },
-    include: { versions: { select: { versionNumber: true } } },
-  })
-  if (!framework) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Framework not found" } }, { status: 404 })
-
-  const parsed = bodySchema.safeParse(await request.json().catch(() => null))
-  if (!parsed.success) return NextResponse.json({ error: { code: "BAD_REQUEST", message: "Invalid body" } }, { status: 400 })
-
-  const nextVersionNumber = (framework.versions.map((v) => v.versionNumber).sort((a, b) => b - a)[0] ?? 0) + 1
-
-  const versionId = await prisma.$transaction(async (tx) => {
-    if (parsed.data.makeActive) {
-      await tx.frameworkVersion.updateMany({ where: { frameworkId, isActive: true }, data: { isActive: false } })
-    }
-    const version = await tx.frameworkVersion.create({
-      data: { frameworkId, versionNumber: nextVersionNumber, isActive: parsed.data.makeActive, createdByUserId: ctx.user.id },
-      select: { id: true },
+  try {
+    const { frameworkId } = await context.params
+    const framework = await prisma.framework.findFirst({
+      where: { id: frameworkId, orgId: ctx.org.id },
+      include: { versions: { select: { versionNumber: true } } },
     })
+    if (!framework) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Framework not found" } }, { status: 404 })
 
-    const phases = parsed.data.phases.sort((a, b) => a.order - b.order)
-    for (const [i, phase] of phases.entries()) {
-      const createdPhase = await tx.frameworkPhase.create({
-        data: { frameworkVersionId: version.id, sortOrder: i, name: phase.name, objective: phase.objective, rubricJson: phase.rubric ? { text: phase.rubric } : null },
+    const parsed = bodySchema.safeParse(await request.json().catch(() => null))
+    if (!parsed.success) return NextResponse.json({ error: { code: "BAD_REQUEST", message: "Invalid body" } }, { status: 400 })
+
+    const nextVersionNumber = (framework.versions.map((v) => v.versionNumber).sort((a, b) => b - a)[0] ?? 0) + 1
+
+    const versionId = await prisma.$transaction(async (tx) => {
+      if (parsed.data.makeActive) {
+        await tx.frameworkVersion.updateMany({ where: { frameworkId, isActive: true }, data: { isActive: false } })
+      }
+      const version = await tx.frameworkVersion.create({
+        data: { frameworkId, versionNumber: nextVersionNumber, isActive: parsed.data.makeActive, createdByUserId: ctx.user.id },
         select: { id: true },
       })
-      for (const q of phase.questions) {
-        await tx.frameworkQuestion.create({ data: { phaseId: createdPhase.id, text: q.text, tags: q.tags, weight: q.weight } })
+
+      const phases = parsed.data.phases.sort((a, b) => a.order - b.order)
+      for (const [i, phase] of phases.entries()) {
+        const createdPhase = await tx.frameworkPhase.create({
+          data: {
+            frameworkVersionId: version.id,
+            sortOrder: i,
+            name: phase.name,
+            objective: phase.objective,
+            rubricJson: phase.rubric ? { text: phase.rubric } : null,
+          },
+          select: { id: true },
+        })
+        for (const q of phase.questions) {
+          await tx.frameworkQuestion.create({ data: { phaseId: createdPhase.id, text: q.text, tags: q.tags, weight: q.weight } })
+        }
       }
-    }
-    return version.id
-  })
+      return version.id
+    })
 
-  return NextResponse.json({ data: { versionId } })
+    return NextResponse.json({ data: { versionId } })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ error: { code: "INTERNAL_ERROR", message: msg || "Request failed" } }, { status: 500 })
+  }
 }
-
