@@ -246,7 +246,7 @@ Vercel runs the `vercel-build` script from `package.json`, which includes:
 
 ## QA scripts (live)
 
-- Smoke test (logs in, checks core APIs, validates embeds):
+- Smoke test (logs in, checks core APIs, validates embeds, imports a framework PDF and applies it to a call):
   - `pnpm live:smoke`
 - Deep route QA (captures screenshots under `artifacts/deep-qa/`):
   - `pnpm live:deep-qa`
@@ -258,15 +258,21 @@ Frameworks are versioned and immutable-ish:
 - Template catalog frameworks are seeded and kept separate from user-created frameworks.
 
 ### Import / extraction flow
-- Upload a doc (PDF/DOCX/MD) at `/app/frameworks/import`
-- Stored to `STORAGE_BUCKET_FRAMEWORK_UPLOADS`
-- Server extracts text best-effort:
-  - PDF: `pdf-parse`
+- Upload a doc (PDF/DOCX/MD) at `/app/frameworks/import`.
+- Large files (PDFs) use direct-to-Storage upload to avoid Vercel request body limits:
+  1) `POST /api/frameworks/import/presign` → `{ uploadId, bucket, key, url }`
+  2) Browser `PUT` the file to `url` (Supabase Storage S3-compatible endpoint)
+  3) `POST /api/frameworks/import/finalize` → server downloads from Storage, extracts text, writes `extracted.txt` to `STORAGE_BUCKET_FRAMEWORK_EXTRACTED_TEXT`
+- Text extraction is best-effort:
+  - PDF: `pdf-parse` (imported from `pdf-parse/lib/pdf-parse.js` for serverless correctness)
   - DOCX: `mammoth`
-  - If OCR is required: extraction is left empty and the UI will show an “OCR required” message (OCR is not implemented yet)
-- The server generates:
-  1) a structured `FrameworkDraft` JSON for the builder
-  2) a “prompt view” text block the user can copy
+  - MD: raw UTF-8
+  - If extraction yields empty text, the upload is marked `ocr_required` and the UI blocks draft generation (OCR is not implemented yet).
+- Draft generation:
+  - `POST /api/frameworks/import/[uploadId]/draft` runs an OpenAI JSON-only extraction against the first ~25k chars of extracted text.
+  - Draft outputs are validated with zod; question weights are clamped to `1..5` to avoid flaky model outputs.
+- Debugging extraction (admins only):
+  - `POST /api/frameworks/import/finalize?debug=1` includes safe diagnostics (object size/header + parser error).
 
 ## Embeds (read-only)
 
@@ -306,7 +312,8 @@ All API routes live under `app/api/*` and are org-scoped using the server-derive
   - `GET /api/frameworks/templates`
   - `GET /api/frameworks/[frameworkId]`
   - `POST /api/frameworks/[frameworkId]/versions`
-  - Import flow: `POST /api/frameworks/import/upload` → `GET /api/frameworks/import/[uploadId]/text` → `POST /api/frameworks/import/[uploadId]/draft`
+  - Import flow (recommended): `POST /api/frameworks/import/presign` → `PUT {signedUrl}` → `POST /api/frameworks/import/finalize` → `GET /api/frameworks/import/[uploadId]/text` → `POST /api/frameworks/import/[uploadId]/draft`
+  - Import flow (legacy / small files only): `POST /api/frameworks/import/upload` (multipart) → `GET /api/frameworks/import/[uploadId]/text` → `POST /api/frameworks/import/[uploadId]/draft`
 - Integrations:
   - API keys: `GET/POST /api/integrations/api-keys`, `DELETE /api/integrations/api-keys/[apiKeyId]`
   - Outbound webhooks: `GET/POST /api/integrations/webhooks`, `DELETE /api/integrations/webhooks/[webhookId]`
