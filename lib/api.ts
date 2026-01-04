@@ -128,15 +128,12 @@ export async function createFramework(data: { name: string; description: string;
 export async function saveFrameworkVersionDraft(
   frameworkId: string,
   version: Partial<FrameworkVersion>,
-): Promise<FrameworkVersion> {
+): Promise<string> {
   const res = await apiFetch<{ versionId: string }>(`/api/frameworks/${encodeURIComponent(frameworkId)}/versions`, {
     method: "POST",
     body: JSON.stringify({ phases: version.phases ?? [], makeActive: true }),
   })
-  const fw = await getFramework(frameworkId)
-  const v = fw?.versions.find((vv) => vv.id === res.versionId)
-  if (!v) throw new Error("Version not found after save")
-  return v
+  return res.versionId
 }
 
 export async function publishFrameworkVersion(_frameworkId: string, _versionId: string): Promise<void> {
