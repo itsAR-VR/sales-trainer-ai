@@ -17,17 +17,25 @@ async function extractText(opts: { buffer: Buffer; filename: string; mimeType: s
     return opts.buffer.toString("utf8")
   }
   if (opts.mimeType === "application/pdf" || ext === "pdf") {
-    const pdfParse = (await import("pdf-parse")).default
-    const res = await pdfParse(opts.buffer)
-    return res.text || ""
+    try {
+      const pdfParse = (await import("pdf-parse")).default
+      const res = await pdfParse(opts.buffer)
+      return res.text || ""
+    } catch {
+      return ""
+    }
   }
   if (
     opts.mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
     ext === "docx"
   ) {
-    const mammoth = await import("mammoth")
-    const res = await mammoth.extractRawText({ buffer: opts.buffer })
-    return res.value || ""
+    try {
+      const mammoth = await import("mammoth")
+      const res = await mammoth.extractRawText({ buffer: opts.buffer })
+      return res.value || ""
+    } catch {
+      return ""
+    }
   }
   return ""
 }
@@ -85,4 +93,3 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ data: { extractionId: upload.id, ocrRequired: false } })
 }
-
