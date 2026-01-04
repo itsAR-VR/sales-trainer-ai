@@ -18,7 +18,9 @@ async function extractText(opts: { buffer: Buffer; filename: string; mimeType: s
   }
   if (opts.mimeType === "application/pdf" || ext === "pdf") {
     try {
-      const mod = await import("pdf-parse")
+      // NOTE: pdf-parse's package entrypoint runs a debug demo when `module.parent` is falsy,
+      // which can happen in Next/Vercel bundling. Import the library entry directly instead.
+      const mod = await import("pdf-parse/lib/pdf-parse.js")
       const pdfParse: unknown = (mod as any).default ?? mod
       if (typeof pdfParse !== "function") throw new Error("pdf-parse did not export a function")
       const res = await pdfParse(opts.buffer)
