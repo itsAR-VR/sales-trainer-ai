@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma"
 import { serverEnv } from "@/src/lib/env"
 import { downloadObjectToBuffer, headObject, uploadStream } from "@/src/lib/storage/s3"
 import { Readable } from "node:stream"
+import { MembershipRole } from "@prisma/client"
 
 export const runtime = "nodejs"
 export const maxDuration = 60
@@ -17,30 +18,36 @@ const bodySchema = z.object({
   mimeType: z.string().min(1),
 })
 
-async function extractText(opts: { buffer: Buffer; filename: string; mimeType: string }) {
+type ExtractTextResult = { text: string; error: Error | null }
+
+async function extractText(opts: { buffer: Buffer; filename: string; mimeType: string }): Promise<ExtractTextResult> {
   const ext = opts.filename.toLowerCase().split(".").pop() ?? ""
   if (opts.mimeType === "text/markdown" || ext === "md") {
-    return opts.buffer.toString("utf8")
+    return { text: opts.buffer.toString("utf8"), error: null }
   }
   if (opts.mimeType === "application/pdf" || ext === "pdf") {
     try {
-      const pdfParse = (await import("pdf-parse")).default
+      const mod = await import("pdf-parse")
+      const pdfParse: unknown = (mod as any).default ?? mod
+      if (typeof pdfParse !== "function") throw new Error("pdf-parse did not export a function")
       const res = await pdfParse(opts.buffer)
-      return res.text || ""
-    } catch {
-      return ""
+      return { text: (res?.text as string | undefined) || "", error: null }
+    } catch (e) {
+      return { text: "", error: e instanceof Error ? e : new Error(String(e)) }
     }
   }
   if (opts.mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || ext === "docx") {
     try {
-      const mammoth = await import("mammoth")
+      const mod = await import("mammoth")
+      const mammoth: any = (mod as any).default ?? mod
+      if (!mammoth?.extractRawText) throw new Error("mammoth did not export extractRawText")
       const res = await mammoth.extractRawText({ buffer: opts.buffer })
-      return res.value || ""
-    } catch {
-      return ""
+      return { text: (res?.value as string | undefined) || "", error: null }
+    } catch (e) {
+      return { text: "", error: e instanceof Error ? e : new Error(String(e)) }
     }
   }
-  return ""
+  return { text: "", error: null }
 }
 
 export async function POST(request: Request) {
@@ -48,6 +55,11 @@ export async function POST(request: Request) {
   if (!ctx.ok) return NextResponse.json({ error: { code: "UNAUTHORIZED", message: "Not signed in" } }, { status: 401 })
 
   try {
+    const url = new URL(request.url)
+    const debugRequested =
+      url.searchParams.get("debug") === "1" &&
+      (ctx.membership.role === MembershipRole.OWNER || ctx.membership.role === MembershipRole.ADMIN)
+
     const parsed = bodySchema.safeParse(await request.json().catch(() => null))
     if (!parsed.success) return NextResponse.json({ error: { code: "BAD_REQUEST", message: "Invalid body" } }, { status: 400 })
 
@@ -84,13 +96,51 @@ export async function POST(request: Request) {
       })
 
     const buffer = await downloadObjectToBuffer({ bucket, key })
-    const extracted = (await extractText({ buffer, filename, mimeType })).trim()
+    const isPdfHeader = buffer.subarray(0, 5).toString("ascii") === "%PDF-"
+    const debug =
+      debugRequested
+        ? {
+            storage: {
+              head: {
+                contentType: head.contentType,
+                sizeBytes: head.sizeBytes ? Number(head.sizeBytes) : null,
+                etag: head.etag,
+              },
+              downloadedBytes: buffer.length,
+              isPdfHeader,
+              firstBytesHex: buffer.subarray(0, 32).toString("hex"),
+            },
+          }
+        : undefined
+
+    const extractedResult = await extractText({ buffer, filename, mimeType })
+    const extracted = extractedResult.text.trim()
+
+    if (extractedResult.error) {
+      await prisma.documentUpload.update({
+        where: { id: uploadId },
+        data: { status: "extract_failed" },
+      })
+      return NextResponse.json(
+        {
+          error: {
+            code: "EXTRACTION_FAILED",
+            message: "Failed to extract text from uploaded document",
+            details: debugRequested
+              ? { parserError: { name: extractedResult.error.name, message: extractedResult.error.message }, ...debug }
+              : undefined,
+          },
+        },
+        { status: 500 },
+      )
+    }
+
     if (!extracted) {
       await prisma.documentUpload.update({
         where: { id: uploadId },
         data: { status: "ocr_required" },
       })
-      return NextResponse.json({ data: { extractionId: uploadId, ocrRequired: true } })
+      return NextResponse.json({ data: { extractionId: uploadId, ocrRequired: true, debug } })
     }
 
     const extractedBucket = serverEnv.STORAGE_BUCKET_FRAMEWORK_EXTRACTED_TEXT
@@ -107,7 +157,7 @@ export async function POST(request: Request) {
       data: { status: "extracted", extractedTextPath: extractedKey },
     })
 
-    return NextResponse.json({ data: { extractionId: uploadId, ocrRequired: false } })
+    return NextResponse.json({ data: { extractionId: uploadId, ocrRequired: false, debug } })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ error: { code: "INTERNAL_ERROR", message: msg || "Request failed" } }, { status: 500 })

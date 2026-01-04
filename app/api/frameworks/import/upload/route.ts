@@ -18,7 +18,9 @@ async function extractText(opts: { buffer: Buffer; filename: string; mimeType: s
   }
   if (opts.mimeType === "application/pdf" || ext === "pdf") {
     try {
-      const pdfParse = (await import("pdf-parse")).default
+      const mod = await import("pdf-parse")
+      const pdfParse: unknown = (mod as any).default ?? mod
+      if (typeof pdfParse !== "function") throw new Error("pdf-parse did not export a function")
       const res = await pdfParse(opts.buffer)
       return res.text || ""
     } catch {
@@ -30,7 +32,9 @@ async function extractText(opts: { buffer: Buffer; filename: string; mimeType: s
     ext === "docx"
   ) {
     try {
-      const mammoth = await import("mammoth")
+      const mod = await import("mammoth")
+      const mammoth: any = (mod as any).default ?? mod
+      if (!mammoth?.extractRawText) throw new Error("mammoth did not export extractRawText")
       const res = await mammoth.extractRawText({ buffer: opts.buffer })
       return res.value || ""
     } catch {
