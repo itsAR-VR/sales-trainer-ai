@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { serverEnv } from "@/src/lib/env"
 import { runDueJobsOnce } from "@/src/lib/jobs/run"
 
-export async function POST(request: Request) {
+async function handle(request: Request) {
   const provided =
     request.headers.get("x-cron-secret") ||
     new URL(request.url).searchParams.get("secret") ||
@@ -16,3 +16,10 @@ export async function POST(request: Request) {
   return NextResponse.json({ ok: true, processed })
 }
 
+export async function GET(request: Request) {
+  return handle(request)
+}
+
+export async function POST(request: Request) {
+  return handle(request)
+}

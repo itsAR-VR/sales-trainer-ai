@@ -102,7 +102,7 @@ Auth routes:
 - `/login`, `/signup`, `/forgot-password`, `/reset-password`
 - `/api/auth/logout` (server logout)
 
-The app uses `middleware.ts` to refresh sessions and protect `/app/*` (redirects to `/login`).
+The app uses `proxy.ts` (Next.js 16 convention) to refresh sessions and protect `/app/*` (redirects to `/login`).
 
 ### 2) Database (Prisma)
 - Set `DATABASE_URL` and `DIRECT_URL` from Supabase’s Postgres connection strings.
@@ -120,6 +120,8 @@ This repo uses Prisma migrations (`prisma/migrations/*`).
   - `pnpm db:migrate`
 - Apply migrations in a non-interactive environment (prod/CI):
   - `pnpm db:deploy`
+
+**No `db push` policy:** shared environments (preview/prod) must be migration-first. The `pnpm db:push` script is guarded and will only run against an explicitly-allowed local database.
 
 **If your database was previously created with `prisma db push`:**
 You must baseline the existing DB once so Prisma doesn’t try to re-create tables.
@@ -193,7 +195,8 @@ pnpm worker
 ```
 
 Server/cron runner (e.g. Vercel Cron):
-- Configure a cron to `POST /api/admin/run-jobs`
+- This repo includes `vercel.json` Cron Jobs config to hit `GET /api/admin/run-jobs` every 5 minutes.
+- If you configure Cron Jobs manually, you can also `POST /api/admin/run-jobs`.
 - Provide the secret via one of:
   - `Authorization: Bearer <CRON_SECRET>`
   - `x-cron-secret: <CRON_SECRET>`

@@ -1,11 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { CodeBlock } from "@/components/code-block"
 import { EmptyState } from "@/components/empty-state"
-import { Download, Send, FileText, Copy, Check, ExternalLink } from "lucide-react"
+import { Download, FileText, Copy, Check, Settings } from "lucide-react"
 import type { Call, CrmExportPayload } from "@/lib/types"
 import { getCrmExportPayload } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
@@ -15,6 +16,7 @@ interface CallExportsTabProps {
 }
 
 export function CallExportsTab({ call }: CallExportsTabProps) {
+  const router = useRouter()
   const [crmPayload, setCrmPayload] = useState<CrmExportPayload | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [copied, setCopied] = useState(false)
@@ -54,18 +56,21 @@ export function CallExportsTab({ call }: CallExportsTabProps) {
     }
   }
 
-  const handleSendToCrm = () => {
-    toast({
-      title: "CRM Integration",
-      description: "CRM integration coming soon. Use the copy button to export manually.",
-    })
+  const downloadFromUrl = (url: string) => {
+    const a = document.createElement("a")
+    a.href = url
+    a.rel = "noopener"
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
   }
 
-  const handleDownload = (type: string) => {
-    toast({
-      title: "Download started",
-      description: `Downloading ${type}...`,
-    })
+  const handleDownloadCrmJson = () => {
+    downloadFromUrl(`/api/calls/${encodeURIComponent(call.id)}/crm-export?download=1`)
+  }
+
+  const handleDownloadTranscript = (format: "txt" | "json" | "srt") => {
+    downloadFromUrl(`/api/calls/${encodeURIComponent(call.id)}/transcript?format=${format}&download=1`)
   }
 
   if (call.status !== "ready") {
@@ -93,9 +98,9 @@ export function CallExportsTab({ call }: CallExportsTabProps) {
                 {copied ? <Check className="mr-2 h-4 w-4" /> : <Copy className="mr-2 h-4 w-4" />}
                 {copied ? "Copied" : "Copy JSON"}
               </Button>
-              <Button size="sm" onClick={handleSendToCrm} disabled={!crmPayload || isLoading}>
-                <Send className="mr-2 h-4 w-4" />
-                Send to CRM
+              <Button size="sm" onClick={handleDownloadCrmJson} disabled={!crmPayload || isLoading}>
+                <Download className="mr-2 h-4 w-4" />
+                Download JSON
               </Button>
             </div>
           </div>
@@ -115,24 +120,16 @@ export function CallExportsTab({ call }: CallExportsTabProps) {
         </CardContent>
       </Card>
 
-      {/* External Dashboard */}
+      {/* Integrations */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">External Dashboards</CardTitle>
-          <CardDescription>Send call data to connected external systems</CardDescription>
+          <CardTitle className="text-base">Integrations</CardTitle>
+          <CardDescription>Configure webhooks and API keys for downstream systems</CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-3">
-          <Button variant="outline" size="sm" onClick={() => handleSendToCrm()}>
-            <ExternalLink className="mr-2 h-4 w-4" />
-            Salesforce
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => handleSendToCrm()}>
-            <ExternalLink className="mr-2 h-4 w-4" />
-            HubSpot
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => handleSendToCrm()}>
-            <ExternalLink className="mr-2 h-4 w-4" />
-            Pipedrive
+        <CardContent>
+          <Button variant="outline" size="sm" onClick={() => router.push("/app/integrations")}>
+            <Settings className="mr-2 h-4 w-4" />
+            Manage integrations
           </Button>
         </CardContent>
       </Card>
@@ -144,25 +141,17 @@ export function CallExportsTab({ call }: CallExportsTabProps) {
           <CardDescription>Download call artifacts in various formats</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-3">
-          <Button variant="outline" size="sm" onClick={() => handleDownload("transcript (TXT)")}>
+          <Button variant="outline" size="sm" onClick={() => handleDownloadTranscript("txt")}>
             <Download className="mr-2 h-4 w-4" />
             Transcript (TXT)
           </Button>
-          <Button variant="outline" size="sm" onClick={() => handleDownload("transcript (JSON)")}>
+          <Button variant="outline" size="sm" onClick={() => handleDownloadTranscript("json")}>
             <Download className="mr-2 h-4 w-4" />
             Transcript (JSON)
           </Button>
-          <Button variant="outline" size="sm" onClick={() => handleDownload("transcript (SRT)")}>
+          <Button variant="outline" size="sm" onClick={() => handleDownloadTranscript("srt")}>
             <Download className="mr-2 h-4 w-4" />
             Subtitles (SRT)
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => handleDownload("summary (PDF)")}>
-            <Download className="mr-2 h-4 w-4" />
-            Summary (PDF)
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => handleDownload("full report (PDF)")}>
-            <Download className="mr-2 h-4 w-4" />
-            Full Report (PDF)
           </Button>
         </CardContent>
       </Card>

@@ -9,7 +9,7 @@
     "start": "next start",
     "postinstall": "prisma generate",
     "vercel-build": "prisma migrate deploy && prisma generate && next build",
-    "db:push": "prisma db push",
+    "db:push": "node scripts/db-push-local.mjs",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",

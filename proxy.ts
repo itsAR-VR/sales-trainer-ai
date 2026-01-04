@@ -6,7 +6,7 @@ function isAuthRoute(pathname: string) {
   return pathname === "/login" || pathname === "/signup" || pathname === "/forgot-password" || pathname === "/reset-password"
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })
 
   const supabase = createServerClient(publicEnv.NEXT_PUBLIC_SUPABASE_URL, publicEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
@@ -56,4 +56,3 @@ export const config = {
     "/((?!_next/static|_next/image|favicon.ico|icon.svg|icon-light-32x32.png|icon-dark-32x32.png|apple-icon.png).*)",
   ],
 }
-

@@ -57,6 +57,19 @@ export async function getCrmExportPayload(callId: string): Promise<CrmExportPayl
   return apiFetch<CrmExportPayload | null>(`/api/calls/${encodeURIComponent(callId)}/crm-export`)
 }
 
+export async function createCall(data: {
+  title: string
+  meetingUrl: string
+  platform: string
+  clientId?: string
+  createRecallBot?: boolean
+}): Promise<Call | null> {
+  return apiFetch<Call | null>(`/api/calls`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+}
+
 export async function updateParticipantRole(
   callId: string,
   participantId: string,
@@ -231,6 +244,7 @@ export const api = {
   calls: {
     list: listCalls,
     getById: getCall,
+    create: createCall,
     getPlaybackUrl: getCallPlaybackUrl,
     getTranscript: getCallTranscript,
     getCrmExport: getCrmExportPayload,
