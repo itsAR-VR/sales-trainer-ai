@@ -27,6 +27,7 @@ export default function ImportFrameworkPage() {
   const router = useRouter()
   const [step, setStep] = useState<Step>("upload")
   const [isLoading, setIsLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string>("")
   const [extractionId, setExtractionId] = useState<string>("")
   const [extractedText, setExtractedText] = useState<string>("")
   const [ocrRequired, setOcrRequired] = useState(false)
@@ -44,6 +45,7 @@ export default function ImportFrameworkPage() {
 
   const handleFileUpload = async (file: File) => {
     setIsLoading(true)
+    setErrorMessage("")
     try {
       const { extractionId, ocrRequired } = await uploadFrameworkDocument(file)
       setExtractionId(extractionId)
@@ -55,6 +57,8 @@ export default function ImportFrameworkPage() {
         setExtractedText("")
       }
       setStep("extract")
+    } catch (e) {
+      setErrorMessage(e instanceof Error ? e.message : "Upload failed")
     } finally {
       setIsLoading(false)
     }
@@ -62,11 +66,14 @@ export default function ImportFrameworkPage() {
 
   const handleGenerateDraft = async () => {
     setIsLoading(true)
+    setErrorMessage("")
     try {
       const { version, promptViewText } = await generateFrameworkDraft(extractionId)
       setDraftFramework(version)
       setPromptViewText(promptViewText)
       setStep("draft")
+    } catch (e) {
+      setErrorMessage(e instanceof Error ? e.message : "Draft generation failed")
     } finally {
       setIsLoading(false)
     }
@@ -75,6 +82,7 @@ export default function ImportFrameworkPage() {
   const handleSaveFramework = async () => {
     if (!draftFramework || !frameworkName) return
     setIsLoading(true)
+    setErrorMessage("")
     try {
       const framework = await createFramework({
         name: frameworkName,
@@ -85,6 +93,8 @@ export default function ImportFrameworkPage() {
       setTimeout(() => {
         router.push(`/app/frameworks/${framework.id}`)
       }, 1500)
+    } catch (e) {
+      setErrorMessage(e instanceof Error ? e.message : "Save failed")
     } finally {
       setIsLoading(false)
     }
@@ -135,6 +145,12 @@ export default function ImportFrameworkPage() {
       {/* Step Content */}
       <Card className="max-w-3xl mx-auto">
         <CardContent className="pt-6">
+          {errorMessage ? (
+            <Alert className="mb-6" variant="destructive">
+              <AlertTitle>Something went wrong</AlertTitle>
+              <AlertDescription>{errorMessage}</AlertDescription>
+            </Alert>
+          ) : null}
           {step === "upload" && (
             <div
               className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors ${

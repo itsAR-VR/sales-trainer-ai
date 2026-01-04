@@ -1,6 +1,6 @@
 import "server-only"
 
-import { S3Client, HeadObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3"
+import { S3Client, HeadObjectCommand, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
 import { Upload } from "@aws-sdk/lib-storage"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { Readable } from "node:stream"
@@ -58,6 +58,13 @@ export async function getSignedDownloadUrl(opts: { bucket: string; key: string; 
   })
 }
 
+export async function getSignedUploadUrl(opts: { bucket: string; key: string; contentType: string; expiresSeconds: number }) {
+  const client = getS3Client()
+  return getSignedUrl(client, new PutObjectCommand({ Bucket: opts.bucket, Key: opts.key, ContentType: opts.contentType }), {
+    expiresIn: opts.expiresSeconds,
+  })
+}
+
 export async function downloadObjectToBuffer(opts: { bucket: string; key: string }) {
   const client = getS3Client()
   const res = await client.send(new GetObjectCommand({ Bucket: opts.bucket, Key: opts.key }))
@@ -67,4 +74,3 @@ export async function downloadObjectToBuffer(opts: { bucket: string; key: string
   for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
   return Buffer.concat(chunks)
 }
-

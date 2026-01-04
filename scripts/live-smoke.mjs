@@ -168,8 +168,55 @@ async function main() {
   await page.goto(clientEmbedUrl, { waitUntil: "domcontentloaded" })
   if (!page.url().includes(`/embed/clients/${clientId}`)) throw new Error("Failed to load client embed page")
 
+  // 7) Framework import (PDF) + apply to an example call
+  const fixture = path.join(process.cwd(), "test", "fixtures", "framework-example.pdf")
+  if (!fs.existsSync(fixture)) {
+    throw new Error(`Missing framework PDF fixture at ${fixture}`)
+  }
+
+  const frameworkName = `Smoke Framework ${new Date().toISOString()}`
+
+  await page.goto("/app/frameworks/import", { waitUntil: "domcontentloaded" })
+  await page.waitForLoadState("networkidle")
+  await page.setInputFiles('input[type="file"]', fixture)
+
+  await page.getByText("Extracted Text").waitFor({ timeout: 120000 })
+  if (await page.getByText("OCR required").isVisible().catch(() => false)) {
+    throw new Error("Framework import returned OCR required for the PDF fixture (expected extractable text)")
+  }
+
+  const extracted = await page.locator("pre").first().innerText()
+  if ((extracted || "").trim().length < 200) {
+    throw new Error(`Extracted text too short (${(extracted || "").trim().length} chars)`)
+  }
+
+  await Promise.all([
+    page.getByText("Generated Framework Draft").waitFor({ timeout: 240000 }),
+    page.getByRole("button", { name: "Generate Draft Framework" }).click(),
+  ])
+
+  await page.fill("#framework-name", frameworkName)
+  await Promise.all([
+    page.waitForURL(/\/app\/frameworks\//, { timeout: 120000 }),
+    page.getByRole("button", { name: "Save Framework" }).click(),
+  ])
+
+  const bodyText = await page.locator("body").innerText()
+  if (!bodyText.toLowerCase().includes(frameworkName.toLowerCase())) {
+    throw new Error("Saved framework page did not include the new framework name")
+  }
+
+  await page.goto(`/app/calls/${callId}`, { waitUntil: "domcontentloaded" })
+  await page.waitForLoadState("networkidle").catch(() => {})
+  await page.getByRole("tab", { name: "Framework" }).click()
+
+  await page.getByRole("button", { name: "Select a framework" }).click()
+  await page.getByRole("option", { name: frameworkName }).click()
+  await page.getByRole("button", { name: "Apply" }).click()
+  await page.getByText("Framework applied").waitFor({ timeout: 30000 })
+
   await browser.close()
-  process.stdout.write("LIVE SMOKE OK: auth redirect + UI login + /api/health + /api/me + /api/admin/storage + embeds\n")
+  process.stdout.write("LIVE SMOKE OK: auth redirect + UI login + /api/health + /api/me + /api/admin/storage + embeds + framework import/apply\n")
 }
 
 await main()

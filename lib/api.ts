@@ -150,12 +150,35 @@ export async function activateFrameworkVersion(_frameworkId: string, _versionId:
 // ==================== DOCUMENT EXTRACTION API ====================
 
 export async function uploadFrameworkDocument(file: File): Promise<{ extractionId: string }> {
-  const form = new FormData()
-  form.append("file", file)
-  const res = await fetch("/api/frameworks/import/upload", { method: "POST", body: form })
-  const json = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(typeof json?.error?.message === "string" ? json.error.message : "Upload failed")
-  return json.data as { extractionId: string; ocrRequired?: boolean }
+  const mimeType = file.type || "application/octet-stream"
+  const presign = await apiFetch<{ uploadId: string; bucket: string; key: string; filename: string; mimeType: string; url: string }>(
+    "/api/frameworks/import/presign",
+    {
+      method: "POST",
+      body: JSON.stringify({ filename: file.name, mimeType, sizeBytes: file.size }),
+    },
+  )
+
+  const put = await fetch(presign.url, {
+    method: "PUT",
+    headers: { "Content-Type": presign.mimeType || mimeType },
+    body: file,
+  })
+  if (!put.ok) {
+    const text = await put.text().catch(() => "")
+    throw new Error(`Upload failed: ${put.status} ${text.slice(0, 120)}`)
+  }
+
+  return apiFetch<{ extractionId: string; ocrRequired?: boolean }>("/api/frameworks/import/finalize", {
+    method: "POST",
+    body: JSON.stringify({
+      uploadId: presign.uploadId,
+      bucket: presign.bucket,
+      key: presign.key,
+      filename: presign.filename,
+      mimeType: presign.mimeType || mimeType,
+    }),
+  })
 }
 
 export async function getExtractedText(extractionId: string): Promise<string> {

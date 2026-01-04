@@ -41,9 +41,7 @@ export function CallDetailContent({ call }: CallDetailContentProps) {
       <TabsList className="w-full justify-start overflow-x-auto">
         <TabsTrigger value="overview">Overview</TabsTrigger>
         <TabsTrigger value="transcript">Transcript</TabsTrigger>
-        <TabsTrigger value="framework" disabled={!call.frameworkScore}>
-          Framework
-        </TabsTrigger>
+        <TabsTrigger value="framework">Framework</TabsTrigger>
         <TabsTrigger value="exports" disabled={call.status !== "ready"}>
           Exports
         </TabsTrigger>
