@@ -90,9 +90,7 @@ export default function ImportFrameworkPage() {
       })
       await saveFrameworkVersionDraft(framework.id, draftFramework)
       setStep("review")
-      setTimeout(() => {
-        router.push(`/app/frameworks/${framework.id}`)
-      }, 1500)
+      router.push(`/app/frameworks/${framework.id}`)
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : "Save failed")
     } finally {

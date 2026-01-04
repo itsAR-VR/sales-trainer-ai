@@ -197,14 +197,12 @@ async function main() {
 
   await page.fill("#framework-name", frameworkName)
   await Promise.all([
-    page.waitForURL(/\/app\/frameworks\//, { timeout: 120000 }),
+    page.waitForURL(/\/app\/frameworks\/[0-9a-f-]+/i, { timeout: 120000, waitUntil: "domcontentloaded" }),
     page.getByRole("button", { name: "Save Framework" }).click(),
   ])
 
-  const bodyText = await page.locator("body").innerText()
-  if (!bodyText.toLowerCase().includes(frameworkName.toLowerCase())) {
-    throw new Error("Saved framework page did not include the new framework name")
-  }
+  // Client navigation can briefly show loading UI; wait until the framework name renders.
+  await page.getByText(frameworkName).first().waitFor({ timeout: 120000 })
 
   await page.goto(`/app/calls/${callId}`, { waitUntil: "domcontentloaded" })
   await page.waitForLoadState("networkidle").catch(() => {})
