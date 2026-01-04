@@ -72,7 +72,12 @@ export const FrameworkDraftSchema = z.object({
         z.object({
           text: z.string().min(1),
           tags: z.array(z.string()).default([]),
-          weight: z.number().int().min(1).max(5).default(1),
+          weight: z
+            .coerce
+            .number()
+            .int()
+            .catch(1)
+            .transform((n) => (Number.isFinite(n) ? Math.max(1, Math.min(5, n)) : 1)),
           required: z.boolean().default(false),
         }),
       ),
